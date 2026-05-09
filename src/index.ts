@@ -115,7 +115,10 @@ type DiscordAuditLog = {
 
 type StoredConfig = {
   guildId: string;
+  guildName: string;
   channelId: string;
+  channels: DiscordChannel[];
+  channelsUpdatedAt: string | null;
   tiktokUsername: string;
   tiktokLink: string;
   customMessage: string;
@@ -315,6 +318,32 @@ async function getStoredTikTokAccounts(kv: StatusKv, fallbackUsername: string, f
   }
 }
 
+function normalizeDiscordChannels(value: unknown): DiscordChannel[] {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .map((channel) => {
+      const item = channel && typeof channel === "object" ? (channel as Partial<DiscordChannel>) : {};
+      return {
+        id: String(item.id || "").trim(),
+        name: String(item.name || "").trim(),
+        type: Number(item.type),
+      };
+    })
+    .filter((channel) => channel.id && channel.name && Number.isFinite(channel.type));
+}
+
+async function getStoredDiscordChannels(kv: StatusKv) {
+  const raw = await kv.get("discord_channels");
+  if (!raw) return [];
+
+  try {
+    return normalizeDiscordChannels(JSON.parse(raw));
+  } catch {
+    return [];
+  }
+}
+
 async function getStoredConfig(env: Env): Promise<StoredConfig> {
   const kv = requireKv(env);
   const tiktokUsername = normalizeTikTokUsername(
@@ -323,10 +352,14 @@ async function getStoredConfig(env: Env): Promise<StoredConfig> {
   const customMessage = (await kv.get("custom_message")) || DEFAULT_CUSTOM_MESSAGE;
   const tiktokAccounts = await getStoredTikTokAccounts(kv, tiktokUsername, customMessage);
   const primaryAccount = tiktokAccounts[0] || DEFAULT_TIKTOK_ACCOUNT;
+  const guildId = (await kv.get("guild_id")) || env.GUILD_ID || "";
 
   return {
-    guildId: (await kv.get("guild_id")) || env.GUILD_ID || "",
+    guildId,
+    guildName: (await kv.get("discord_guild_name")) || "",
     channelId: (await kv.get("channel_id")) || env.DISCORD_CHANNEL_ID || "",
+    channels: await getStoredDiscordChannels(kv),
+    channelsUpdatedAt: await kv.get("discord_channels_updated_at"),
     tiktokUsername: primaryAccount.username,
     tiktokLink: primaryAccount.liveUrl,
     customMessage: primaryAccount.customMessage,
@@ -506,15 +539,28 @@ async function verifyTikTokAccount(usernameInput: unknown): Promise<TikTokWatchA
     throw new HttpError(`TikTok account @${username} was not found.`, 404, "TIKTOK_ACCOUNT_NOT_FOUND");
   }
 
+  if (response.status === 403 || response.status === 429) {
+    return {
+      username,
+      liveUrl: liveUrlFor(username),
+      customMessage: DEFAULT_CUSTOM_MESSAGE,
+      verifiedAt: new Date().toISOString(),
+    };
+  }
+
   if (response.status >= 500) {
     throw new HttpError(`TikTok returned ${response.status}. Try again in a minute.`, 502, "TIKTOK_UNAVAILABLE");
+  }
+
+  if (response.status >= 400) {
+    throw new HttpError(`TikTok returned ${response.status} while checking @${username}.`, 502, "TIKTOK_VERIFY_FAILED");
   }
 
   const html = await response.text();
   const notFoundSignals = [
     /couldn(?:'|&#x27;)?t find this account/i,
     /"statusCode"\s*:\s*10202/i,
-    /"userInfo"\s*:\s*\{\s*\}/i,
+    /"user"\s*:\s*null/i,
   ];
 
   if (notFoundSignals.some((pattern) => pattern.test(html))) {
@@ -715,10 +761,7 @@ function isoFromDiscordSnowflake(id: string) {
   }
 }
 
-async function resolveChannelsGuild(request: Request, env: Env, kv: StatusKv) {
-  const url = new URL(request.url);
-  const requestedGuildId = url.searchParams.get("guildId")?.trim();
-
+async function resolveDiscordGuild(env: Env, kv: StatusKv, requestedGuildId = "") {
   if (requestedGuildId) {
     return { guildId: requestedGuildId, guildName: "" };
   }
@@ -763,18 +806,50 @@ async function resolveChannelsGuild(request: Request, env: Env, kv: StatusKv) {
   );
 }
 
+async function resolveChannelsGuild(request: Request, env: Env, kv: StatusKv) {
+  const url = new URL(request.url);
+  return resolveDiscordGuild(env, kv, url.searchParams.get("guildId")?.trim() || "");
+}
+
+async function cacheDiscordChannels(env: Env, kv: StatusKv, guildId = "") {
+  const guild = await resolveDiscordGuild(env, kv, guildId);
+  const channels = await fetchDiscordJson<DiscordChannel[]>(env, `/guilds/${guild.guildId}/channels`);
+  let guildName = guild.guildName || (await kv.get("discord_guild_name")) || "";
+  const now = new Date().toISOString();
+
+  if (!guildName) {
+    try {
+      const guildDetails = await fetchDiscordJson<DiscordGuild>(env, `/guilds/${guild.guildId}?with_counts=true`);
+      guildName = guildDetails.name || "";
+    } catch {
+      // Channel cache is still useful if the guild name lookup fails.
+    }
+  }
+
+  await kv.put("guild_id", guild.guildId);
+  if (guildName) await kv.put("discord_guild_name", guildName);
+  await kv.put("discord_channels", JSON.stringify(normalizeDiscordChannels(channels)));
+  await kv.put("discord_channels_updated_at", now);
+
+  return {
+    guildId: guild.guildId,
+    guildName,
+    channels,
+    channelsUpdatedAt: now,
+  };
+}
+
 async function handleChannels(request: Request, env: Env) {
   await requireAdmin(request, env);
   const kv = requireKv(env);
-  const guild = await resolveChannelsGuild(request, env, kv);
-  const channels = await fetchDiscordJson<DiscordChannel[]>(env, `/guilds/${guild.guildId}/channels`);
-
-  await kv.put("guild_id", guild.guildId);
+  const url = new URL(request.url);
+  const channelCache = await cacheDiscordChannels(env, kv, url.searchParams.get("guildId")?.trim() || "");
 
   return jsonResponse({
-    guildId: guild.guildId,
-    guildName: guild.guildName,
-    channels,
+    guildId: channelCache.guildId,
+    guildName: channelCache.guildName,
+    channels: channelCache.channels,
+    channelsUpdatedAt: channelCache.channelsUpdatedAt,
   });
 }
 
@@ -998,6 +1073,41 @@ async function runTikTokCheck(env: Env) {
   await updateAggregateLiveStatus(kv, statuses, "cloudflare_cron");
 }
 
+function getChicagoDayHour(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Chicago",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+
+  return {
+    day: `${values.year}-${values.month}-${values.day}`,
+    hour: values.hour || "",
+  };
+}
+
+async function refreshDiscordChannelsAtMidnight(env: Env) {
+  const kv = requireKv(env);
+  const { day, hour } = getChicagoDayHour();
+
+  if (hour !== "00") return;
+  if ((await kv.get("discord_channels_refresh_day")) === day) return;
+
+  try {
+    await cacheDiscordChannels(env, kv);
+    await kv.put("discord_channels_refresh_day", day);
+    await kv.delete("discord_channels_refresh_error");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await kv.put("discord_channels_refresh_error", message.slice(0, 1000));
+    console.error("Discord channel cache refresh failed:", message);
+  }
+}
+
 export default {
   async fetch(request: Request, env: Env) {
     const url = new URL(request.url);
@@ -1069,6 +1179,6 @@ export default {
       return;
     }
 
-    await runTikTokCheck(env);
+    await Promise.all([runTikTokCheck(env), refreshDiscordChannelsAtMidnight(env)]);
   },
 };

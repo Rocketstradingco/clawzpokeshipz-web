@@ -23,6 +23,7 @@ type ChannelResponse = {
   guildId: string;
   guildName?: string;
   channels: Channel[];
+  channelsUpdatedAt?: string | null;
 };
 
 type DiscordSummary = {
@@ -94,7 +95,10 @@ type HomepageContent = {
 
 type ConfigPayload = {
   guildId: string;
+  guildName?: string;
   channelId: string;
+  channels?: Channel[];
+  channelsUpdatedAt?: string | null;
   tiktokUsername: string;
   tiktokLink: string;
   customMessage: string;
@@ -241,6 +245,7 @@ function App() {
   const [guildId, setGuildId] = useState('');
   const [guildName, setGuildName] = useState('');
   const [channels, setChannels] = useState<Channel[]>([]);
+  const [channelsUpdatedAt, setChannelsUpdatedAt] = useState<string | null>(null);
   const [selectedChannel, setSelectedChannel] = useState('');
   const [discordSummary, setDiscordSummary] = useState<DiscordSummary | null>(null);
   const [discordSummaryError, setDiscordSummaryError] = useState('');
@@ -260,8 +265,10 @@ function App() {
     const primaryAccount = accounts[0];
 
     setGuildId(config.guildId || '');
-    setGuildName('');
+    setGuildName(config.guildName || '');
     setSelectedChannel(config.channelId || '');
+    setChannels((config.channels || []).filter((channel) => channel.type === 0 || channel.type === 5));
+    setChannelsUpdatedAt(config.channelsUpdatedAt || null);
     setTikTokAccounts(accounts);
     setTiktokUsername(primaryAccount.username);
     setTiktokLink(config.tiktokLink || primaryAccount.liveUrl);
@@ -401,6 +408,7 @@ function App() {
       if (!Array.isArray(data)) {
         setGuildId(data.guildId);
         setGuildName(data.guildName || '');
+        setChannelsUpdatedAt(data.channelsUpdatedAt || null);
       }
 
       setChannels(nextChannels.filter((channel) => channel.type === 0 || channel.type === 5));
@@ -678,8 +686,9 @@ function App() {
                         placeholder="Leave blank to use the bot server"
                       />
                       {guildName && <small className="field-note">Using {guildName}</small>}
+                      {channelsUpdatedAt && <small className="field-note">Channels cached {formatDateTime(channelsUpdatedAt)}</small>}
                       <button className="btn btn-secondary btn-small" onClick={fetchChannels} disabled={isBusy} type="button">
-                        Fetch Bot Server Channels
+                        Refresh Bot Server Channels
                       </button>
                     </div>
 
@@ -693,6 +702,7 @@ function App() {
                           </option>
                         ))}
                       </select>
+                      {channels.length === 0 && <small className="field-note">No cached channels yet. Refresh once to load them.</small>}
                     </div>
 
                     <div className="admin-subsection discord-insights">
