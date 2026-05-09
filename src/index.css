@@ -48,7 +48,7 @@ textarea {
 
 .banner-stage {
   --stage-ease: linear;
-  --intro-duration: 3.15s;
+  --intro-duration: 3.45s;
   position: relative;
   width: min(100%, 1120px);
   aspect-ratio: 2640 / 992;
@@ -110,54 +110,72 @@ textarea {
     opacity: 0;
     transform: translate3d(0, -132%, 0);
   }
-  8% {
+  6% {
     opacity: 1;
-    transform: translate3d(0, -110%, 0);
+    transform: translate3d(0, -112%, 0);
   }
-  16% {
-    transform: translate3d(0, -84%, 0);
+  12% {
+    transform: translate3d(0, -92%, 0);
+  }
+  18% {
+    transform: translate3d(0, -72%, 0);
   }
   24% {
-    transform: translate3d(0, -58%, 0);
+    transform: translate3d(0, -52%, 0);
   }
-  32% {
-    transform: translate3d(0, -32%, 0);
+  30% {
+    transform: translate3d(0, -33%, 0);
   }
-  40% {
-    transform: translate3d(0, -10%, 0);
+  36% {
+    transform: translate3d(0, -15%, 0);
   }
-  46% {
+  38% {
     transform: translate3d(0, 0, 0);
   }
-  52% {
-    transform: translate3d(0, 32%, 0);
+  42% {
+    transform: translate3d(0, 18%, 0);
+  }
+  46% {
+    transform: translate3d(0, 38%, 0);
+  }
+  50% {
+    transform: translate3d(0, 58%, 0);
+  }
+  54% {
+    transform: translate3d(0, 78%, 0);
   }
   58% {
-    transform: translate3d(0, 62%, 0);
+    transform: translate3d(0, 104%, 0);
   }
-  64% {
-    transform: translate3d(0, 90%, 0);
-  }
-  68% {
-    transform: translate3d(0, 94%, 0);
+  62% {
+    transform: translate3d(0, 96%, 0);
   }
   70% {
-    transform: translate3d(0, 86%, 0);
+    transform: translate3d(0, 78%, 0);
   }
-  76% {
-    transform: translate3d(0, 48%, 0);
+  74% {
+    transform: translate3d(0, 62%, 0);
+  }
+  78% {
+    transform: translate3d(0, 50%, 0);
   }
   82% {
+    transform: translate3d(0, 38%, 0);
+  }
+  86% {
+    transform: translate3d(0, 26%, 0);
+  }
+  90% {
     transform: translate3d(0, 14%, 0);
   }
-  88% {
-    transform: translate3d(0, -4%, 0);
-  }
   94% {
-    transform: translate3d(0, -1%, 0);
+    transform: translate3d(0, 4%, 0);
   }
-  98% {
-    transform: translate3d(0, 0.4%, 0);
+  97% {
+    transform: translate3d(0, -1.2%, 0);
+  }
+  99% {
+    transform: translate3d(0, 0.5%, 0);
   }
   100% {
     opacity: 1;
@@ -167,38 +185,47 @@ textarea {
 
 @keyframes bannerLift {
   0%,
-  66% {
+  54% {
     opacity: 0;
-    transform: translate3d(0, 42%, 0) scale(0.985);
+    transform: translate3d(0, 104%, 0);
   }
-  68% {
+  58% {
     opacity: 1;
-    transform: translate3d(0, 42%, 0) scale(0.985);
+    transform: translate3d(0, 104%, 0);
   }
-  72% {
-    transform: translate3d(0, 34%, 0) scale(0.988);
+  62% {
+    transform: translate3d(0, 96%, 0);
+  }
+  70% {
+    transform: translate3d(0, 78%, 0);
+  }
+  74% {
+    transform: translate3d(0, 62%, 0);
   }
   78% {
-    transform: translate3d(0, 22%, 0) scale(0.993);
+    transform: translate3d(0, 50%, 0);
   }
-  84% {
-    transform: translate3d(0, 10%, 0) scale(0.998);
+  82% {
+    transform: translate3d(0, 38%, 0);
   }
-  89% {
-    transform: translate3d(0, 1%, 0) scale(1.002);
+  86% {
+    transform: translate3d(0, 26%, 0);
   }
-  93% {
-    transform: translate3d(0, -4%, 0) scale(1.004);
+  90% {
+    transform: translate3d(0, 14%, 0);
   }
-  96% {
-    transform: translate3d(0, -1.2%, 0) scale(1.001);
+  94% {
+    transform: translate3d(0, 4%, 0);
   }
-  98% {
-    transform: translate3d(0, 0.5%, 0) scale(0.999);
+  97% {
+    transform: translate3d(0, -1.2%, 0);
+  }
+  99% {
+    transform: translate3d(0, 0.5%, 0);
   }
   100% {
     opacity: 1;
-    transform: translate3d(0, 0, 0) scale(1);
+    transform: translate3d(0, 0, 0);
   }
 }
 
@@ -207,54 +234,72 @@ textarea {
     opacity: 0;
     transform: translate3d(-50%, -132%, 0) scaleY(0.92);
   }
-  8% {
+  6% {
     opacity: 1;
-    transform: translate3d(-50%, -110%, 0) scaleY(0.94);
+    transform: translate3d(-50%, -112%, 0) scaleY(0.94);
   }
-  16% {
-    transform: translate3d(-50%, -84%, 0) scaleY(0.96);
+  12% {
+    transform: translate3d(-50%, -92%, 0) scaleY(0.96);
+  }
+  18% {
+    transform: translate3d(-50%, -72%, 0) scaleY(0.98);
   }
   24% {
-    transform: translate3d(-50%, -58%, 0) scaleY(0.98);
+    transform: translate3d(-50%, -52%, 0) scaleY(1);
   }
-  32% {
-    transform: translate3d(-50%, -32%, 0) scaleY(1);
+  30% {
+    transform: translate3d(-50%, -33%, 0) scaleY(1);
   }
-  40% {
-    transform: translate3d(-50%, -10%, 0) scaleY(1);
+  36% {
+    transform: translate3d(-50%, -15%, 0) scaleY(1);
   }
-  46% {
+  38% {
     transform: translate3d(-50%, 0, 0) scaleY(1);
   }
-  52% {
-    transform: translate3d(-50%, 32%, 0) scaleY(1.12);
+  42% {
+    transform: translate3d(-50%, 18%, 0) scaleY(1.08);
+  }
+  46% {
+    transform: translate3d(-50%, 38%, 0) scaleY(1.16);
+  }
+  50% {
+    transform: translate3d(-50%, 58%, 0) scaleY(1.25);
+  }
+  54% {
+    transform: translate3d(-50%, 78%, 0) scaleY(1.35);
   }
   58% {
-    transform: translate3d(-50%, 62%, 0) scaleY(1.28);
+    transform: translate3d(-50%, 104%, 0) scaleY(1.5);
   }
-  64% {
-    transform: translate3d(-50%, 90%, 0) scaleY(1.4);
-  }
-  68% {
-    transform: translate3d(-50%, 94%, 0) scaleY(1.44);
+  62% {
+    transform: translate3d(-50%, 96%, 0) scaleY(1.43);
   }
   70% {
-    transform: translate3d(-50%, 86%, 0) scaleY(1.36);
+    transform: translate3d(-50%, 78%, 0) scaleY(1.32);
   }
-  76% {
-    transform: translate3d(-50%, 48%, 0) scaleY(1.16);
+  74% {
+    transform: translate3d(-50%, 62%, 0) scaleY(1.24);
+  }
+  78% {
+    transform: translate3d(-50%, 50%, 0) scaleY(1.18);
   }
   82% {
-    transform: translate3d(-50%, 14%, 0) scaleY(1.06);
+    transform: translate3d(-50%, 38%, 0) scaleY(1.13);
   }
-  88% {
-    transform: translate3d(-50%, -4%, 0) scaleY(0.98);
+  86% {
+    transform: translate3d(-50%, 26%, 0) scaleY(1.08);
+  }
+  90% {
+    transform: translate3d(-50%, 14%, 0) scaleY(1.04);
   }
   94% {
-    transform: translate3d(-50%, -1%, 0) scaleY(0.99);
+    transform: translate3d(-50%, 4%, 0) scaleY(1.01);
   }
-  98% {
-    transform: translate3d(-50%, 0.4%, 0) scaleY(1);
+  97% {
+    transform: translate3d(-50%, -1.2%, 0) scaleY(0.99);
+  }
+  99% {
+    transform: translate3d(-50%, 0.5%, 0) scaleY(1);
   }
   100% {
     opacity: 1;
