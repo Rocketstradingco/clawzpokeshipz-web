@@ -1,3 +1,4 @@
+// Deployment Timestamp: 2026-05-08 23:10
 // Shared Discord sending logic
 async function sendDiscordMessage(env, { username, channelId, customMsg, mentionEveryone, isTest = false }) {
   if (!channelId || !env.DISCORD_TOKEN) {
