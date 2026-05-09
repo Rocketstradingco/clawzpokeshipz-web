@@ -18,12 +18,12 @@ function App() {
   const [selectedChannel, setSelectedChannel] = useState('');
   const [tiktokLink, setTiktokLink] = useState('https://www.tiktok.com/@clawzpokeshipz/live');
 
+  const workerUrl = import.meta.env.VITE_WORKER_URL || 'https://your-worker.your-subdomain.workers.dev';
+
   // Polling for live status
   useEffect(() => {
     const checkStatus = async () => {
       try {
-        // Replace with your actual worker URL when deployed
-        const workerUrl = import.meta.env.VITE_WORKER_URL || 'https://your-worker.your-subdomain.workers.dev';
         const response = await fetch(`${workerUrl}/status`);
         const data = await response.json();
         setIsLive(data.isLive);
@@ -33,35 +33,79 @@ function App() {
     };
 
     checkStatus();
-    const interval = setInterval(checkStatus, 60000); // Check every minute
+    const interval = setInterval(checkStatus, 60000);
     return () => clearInterval(interval);
-  }, []);
+  }, [workerUrl]);
 
-  // Simulate login for now - will connect to Worker later
-  const handleLogin = () => {
-    if (password === 'Claw69') {
-      setIsFirstLogin(true);
-      setIsLoggedIn(true);
-      setView('dashboard');
-    } else {
-      // In a real app, check against stored hash in KV
-      alert("Invalid Credentials");
+  // Actual login logic
+  const handleLogin = async () => {
+    try {
+      const response = await fetch(`${workerUrl}/admin/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password })
+      });
+      const data = await response.json();
+      if (data.success) {
+        setIsFirstLogin(data.isFirstLogin);
+        setIsLoggedIn(true);
+        setView('dashboard');
+      } else {
+        alert("Invalid Credentials");
+      }
+    } catch (err) {
+      alert("Login failed. Check Worker connection.");
     }
   };
 
-  const handlePasswordReset = () => {
-    alert("Password updated! (Simulated)");
-    setIsFirstLogin(false);
+  const handlePasswordReset = async () => {
+    if (newPassword.length < 6) {
+      alert("Password must be at least 6 characters.");
+      return;
+    }
+    try {
+      await fetch(`${workerUrl}/admin/update-pass`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentPassword: password, newPassword })
+      });
+      alert("Security Key updated successfully!");
+      setPassword(newPassword);
+      setIsFirstLogin(false);
+    } catch (err) {
+      alert("Failed to update password.");
+    }
   };
 
-  const fetchChannels = () => {
-    // This will call the Worker which calls Discord API
-    console.log("Fetching channels for guild:", guildId);
-    setChannels([
-      { id: '1', name: 'announcements', type: 0 },
-      { id: '2', name: 'live-notifications', type: 0 },
-      { id: '3', name: 'general', type: 0 },
-    ]);
+  const fetchChannels = async () => {
+    try {
+      const response = await fetch(`${workerUrl}/admin/channels`);
+      const data = await response.json();
+      if (Array.isArray(data)) {
+        setChannels(data.filter((c: any) => c.type === 0));
+      } else {
+        alert("Could not fetch channels.");
+      }
+    } catch (err) {
+      alert("Error fetching channels.");
+    }
+  };
+
+  const saveConfig = async () => {
+    try {
+      await fetch(`${workerUrl}/admin/config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          guildId, 
+          channelId: selectedChannel,
+          tiktokUsername: 'clawzpokeshipz' 
+        })
+      });
+      alert("Configuration Saved!");
+    } catch (err) {
+      alert("Failed to save configuration.");
+    }
   };
 
   return (
@@ -193,7 +237,7 @@ function App() {
                       />
                     </div>
                     
-                    <button className="btn btn-primary full-width">SAVE CONFIGURATION</button>
+                    <button className="btn btn-primary full-width" onClick={saveConfig}>SAVE CONFIGURATION</button>
                   </div>
 
                   <div className="admin-sidebar">
@@ -233,18 +277,4 @@ function App() {
 }
 
 export default App;
-          <h3>Updates</h3>
-              <p>Stay tuned for new PokeShipz content and special events.</p>
-            </div>
-          </section>
-        )}
-      </main>
 
-      <footer>
-        <p>&copy; {new Date().getFullYear()} ClawzPokeShipz. All rights reserved.</p>
-      </footer>
-    </div>
-  );
-}
-
-export default App;
