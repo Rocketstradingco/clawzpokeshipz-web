@@ -9,11 +9,6 @@
   "vars": {
     "TIKTOK_USERNAME": "clawzpokeshipz"
   },
-  "kv_namespaces": [
-    {
-      "binding": "STATUS_KV"
-    }
-  ],
   "triggers": {
     "crons": [
       "*/5 * * * *"
