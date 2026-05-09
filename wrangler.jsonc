@@ -1,5 +1,5 @@
 {
-  "name": "pokeshipz-bot",
+  "name": "clawzpokeshipz-web",
   "main": "bot-worker.ts",
   "compatibility_date": "2026-05-09",
   "vars": {
