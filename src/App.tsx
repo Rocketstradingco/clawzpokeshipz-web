@@ -261,8 +261,12 @@ function App() {
 
   return (
     <div className="container">
-      <div className="banner-container">
-        <img src="/logo.png" alt="ClawzPokeShipz Logo" className="banner-image" />
+      <div className="banner-container" aria-label="ClawzPokeShipz animated logo">
+        <div className="banner-stage">
+          <div className="claw-cable" aria-hidden="true"></div>
+          <img src="/logo.png" alt="ClawzPokeShipz Logo" className="banner-image banner-base" />
+          <img src="/claw.png" alt="" className="banner-claw" aria-hidden="true" />
+        </div>
       </div>
 
       <header>
