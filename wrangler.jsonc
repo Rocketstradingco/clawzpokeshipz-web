@@ -1,7 +1,11 @@
 {
-  "name": "pokeshipz-bot",
-  "main": "bot-worker.ts",
+  "name": "clawzpokeshipz-web",
+  "main": "src/index.ts",
   "compatibility_date": "2026-05-09",
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS"
+  },
   "vars": {
     "TIKTOK_USERNAME": "clawzpokeshipz"
   },
