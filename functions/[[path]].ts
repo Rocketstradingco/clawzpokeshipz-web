@@ -21,21 +21,25 @@ export default {
 
     // 2. Admin Login
     if (url.pathname === "/admin/login" && request.method === "POST") {
-      const { password } = await request.json();
-      const clawPass = await env.STATUS_KV.get("admin_pass") || "Claw69";
+      const { username, password } = await request.json();
+      const ownerName = await env.STATUS_KV.get("admin_name") || "Claw";
+      const ownerPass = await env.STATUS_KV.get("admin_pass") || "Claw69";
+      
       const rocketsPass = "pass123";
       
-      if (password === clawPass) {
+      // Check Owner
+      if (username.toLowerCase() === ownerName.toLowerCase() && password === ownerPass) {
         return new Response(JSON.stringify({ 
           success: true, 
-          user: "Claw", 
-          isFirstLogin: clawPass === "Claw69" 
+          user: ownerName, 
+          isFirstLogin: ownerPass === "Claw69" 
         }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" }
         });
       }
 
-      if (password === rocketsPass) {
+      // Check Rockets
+      if (username.toLowerCase() === "rockets" && password === rocketsPass) {
         return new Response(JSON.stringify({ 
           success: true, 
           user: "Rockets", 
@@ -48,16 +52,18 @@ export default {
       return new Response(JSON.stringify({ success: false }), { status: 401, headers: corsHeaders });
     }
 
-    // 3. Update Password
-    if (url.pathname === "/admin/update-pass" && request.method === "POST") {
-      const { currentPassword, newPassword } = await request.json();
+    // 3. Update Password & Name
+    if (url.pathname === "/admin/update-profile" && request.method === "POST") {
+      const { currentPassword, newPassword, newName } = await request.json();
       const storedPass = await env.STATUS_KV.get("admin_pass") || "Claw69";
 
       if (currentPassword !== storedPass) {
         return new Response("Unauthorized", { status: 401, headers: corsHeaders });
       }
 
-      await env.STATUS_KV.put("admin_pass", newPassword);
+      if (newPassword) await env.STATUS_KV.put("admin_pass", newPassword);
+      if (newName) await env.STATUS_KV.put("admin_name", newName);
+      
       return new Response("OK", { headers: corsHeaders });
     }
 

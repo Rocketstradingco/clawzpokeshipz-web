@@ -7,11 +7,14 @@ type Channel = { id: string; name: string; type: number };
 function App() {
   const [isLive, setIsLive] = useState(false);
   const [view, setView] = useState<'home' | 'login' | 'dashboard'>('home');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [adminName, setAdminName] = useState('');
   const [isFirstLogin, setIsFirstLogin] = useState(false);
   const [newPassword, setNewPassword] = useState('');
-  
+  const [newName, setNewName] = useState('');
+
   // Admin Data
   const [guildId, setGuildId] = useState('');
   const [channels, setChannels] = useState<Channel[]>([]);
@@ -47,10 +50,11 @@ function App() {
       const response = await fetch(`${workerUrl}/admin/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password })
+        body: JSON.stringify({ username, password })
       });
       const data = await response.json();
       if (data.success) {
+        setAdminName(data.user);
         setIsFirstLogin(data.isFirstLogin);
         setIsLoggedIn(true);
         setView('dashboard');
@@ -62,22 +66,27 @@ function App() {
     }
   };
 
-  const handlePasswordReset = async () => {
-    if (newPassword.length < 6) {
+  const handleProfileUpdate = async () => {
+    if (newPassword && newPassword.length < 6) {
       alert("Password must be at least 6 characters.");
       return;
     }
     try {
-      await fetch(`${workerUrl}/admin/update-pass`, {
+      await fetch(`${workerUrl}/admin/update-profile`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ currentPassword: password, newPassword })
+        body: JSON.stringify({ 
+          currentPassword: password, 
+          newPassword: newPassword || undefined,
+          newName: newName || undefined
+        })
       });
-      alert("Security Key updated successfully!");
-      setPassword(newPassword);
+      alert("Profile updated successfully!");
+      if (newPassword) setPassword(newPassword);
+      if (newName) setAdminName(newName);
       setIsFirstLogin(false);
     } catch (err) {
-      alert("Failed to update password.");
+      alert("Failed to update profile.");
     }
   };
 
@@ -183,7 +192,15 @@ function App() {
           <section className="admin-box">
             <div className="terminal-header">ADMIN ACCESS PORTAL</div>
             <div className="terminal-body">
-              <p className="prompt">USER: CLAW</p>
+              <div className="input-group">
+                <span className="prompt">USER: </span>
+                <input 
+                  type="text" 
+                  value={username} 
+                  onChange={(e) => setUsername(e.target.value)}
+                  autoFocus
+                />
+              </div>
               <div className="input-group">
                 <span className="prompt">PASS: </span>
                 <input 
@@ -191,7 +208,6 @@ function App() {
                   value={password} 
                   onChange={(e) => setPassword(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
-                  autoFocus
                 />
               </div>
               <button className="btn btn-primary mt-20" onClick={handleLogin}>AUTHORIZE</button>
@@ -201,20 +217,26 @@ function App() {
 
         {view === 'dashboard' && isLoggedIn && (
           <section className="admin-box dashboard">
-            <div className="terminal-header">PC STORAGE SYSTEM - ADMIN PANEL</div>
+            <div className="terminal-header">PC STORAGE SYSTEM - ADMIN: {adminName.toUpperCase()}</div>
             <div className="terminal-body">
               
               {isFirstLogin ? (
                 <div className="reset-flow">
                   <h3>SECURITY ALERT: TEMPORARY PASSWORD DETECTED</h3>
-                  <p>Please set your permanent administrative password:</p>
+                  <p>Please set your permanent administrative credentials:</p>
+                  <input 
+                    type="text" 
+                    placeholder="Display Name (e.g. Claw)" 
+                    value={newName}
+                    onChange={(e) => setNewName(e.target.value)}
+                  />
                   <input 
                     type="password" 
                     placeholder="New Password" 
                     value={newPassword}
                     onChange={(e) => setNewPassword(e.target.value)}
                   />
-                  <button className="btn btn-primary" onClick={handlePasswordReset}>UPDATE SECURITY KEY</button>
+                  <button className="btn btn-primary" onClick={handleProfileUpdate}>UPDATE SECURITY KEY</button>
                 </div>
               ) : (
                 <div className="dashboard-grid">
@@ -296,7 +318,26 @@ function App() {
                   </div>
 
                   <div className="admin-sidebar">
-                    <button className="btn btn-secondary full-width" onClick={() => setIsLoggedIn(false) || setView('home')}>
+                    <div className="profile-edit-section">
+                      <h3><Settings size={18} /> PROFILE</h3>
+                      <input 
+                        type="text" 
+                        placeholder="Change Name" 
+                        value={newName}
+                        onChange={(e) => setNewName(e.target.value)}
+                        className="sidebar-input"
+                      />
+                      <input 
+                        type="password" 
+                        placeholder="Change Password" 
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                        className="sidebar-input"
+                      />
+                      <button className="btn btn-small full-width" onClick={handleProfileUpdate}>UPDATE PROFILE</button>
+                    </div>
+
+                    <button className="btn btn-secondary full-width mt-20" onClick={() => setIsLoggedIn(false) || setView('home')}>
                       <LogOut size={18} /> LOGOUT
                     </button>
                   </div>
