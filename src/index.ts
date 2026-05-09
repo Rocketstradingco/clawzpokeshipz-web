@@ -43,6 +43,61 @@ type DiscordMessageOptions = {
   isTest?: boolean;
 };
 
+type HomepageCard = {
+  title: string;
+  body: string;
+};
+
+type HomepageContent = {
+  heroTitle: string;
+  heroSubtitle: string;
+  tiktokButtonLabel: string;
+  discordButtonLabel: string;
+  cards: HomepageCard[];
+};
+
+type DiscordGuild = {
+  id: string;
+  name: string;
+  approximate_member_count?: number;
+  approximate_presence_count?: number;
+  premium_tier?: number;
+  premium_subscription_count?: number;
+};
+
+type DiscordChannel = {
+  id: string;
+  name: string;
+  type: number;
+};
+
+type DiscordUser = {
+  id: string;
+  username: string;
+  global_name?: string | null;
+  discriminator?: string;
+  bot?: boolean;
+};
+
+type DiscordMember = {
+  user?: DiscordUser;
+  nick?: string | null;
+  joined_at?: string | null;
+};
+
+type DiscordAuditLogEntry = {
+  id: string;
+  action_type: number;
+  user_id?: string;
+  target_id?: string | null;
+  reason?: string | null;
+};
+
+type DiscordAuditLog = {
+  audit_log_entries: DiscordAuditLogEntry[];
+  users: DiscordUser[];
+};
+
 type StoredConfig = {
   guildId: string;
   channelId: string;
@@ -50,12 +105,44 @@ type StoredConfig = {
   tiktokLink: string;
   customMessage: string;
   mentionEveryone: boolean;
+  homepageContent: HomepageContent;
 };
 
 const DEFAULT_TIKTOK_USERNAME = "clawzpokeshipz";
 const DEFAULT_ADMIN_NAME = "Claw";
 const DEFAULT_ADMIN_PASSWORD = "Claw69";
 const DEFAULT_CUSTOM_MESSAGE = "is now LIVE on TikTok!";
+const DEFAULT_HOMEPAGE_CONTENT: HomepageContent = {
+  heroTitle: "The PokeShipz Hub",
+  heroSubtitle: "Catch pack openings, battles, and collector updates live on TikTok.",
+  tiktokButtonLabel: "Visit TikTok",
+  discordButtonLabel: "Join Discord",
+  cards: [
+    {
+      title: "Live Streams",
+      body: "Pack openings and battles from the live table.",
+    },
+    {
+      title: "Community",
+      body: "Discord updates when the TikTok stream goes live.",
+    },
+    {
+      title: "Updates",
+      body: "Collector drops, announcements, and schedule changes.",
+    },
+  ],
+};
+const DISCORD_MEMBER_AUDIT_ACTIONS: Record<number, string> = {
+  20: "Member kicked",
+  21: "Members pruned",
+  22: "Member banned",
+  23: "Member unbanned",
+  24: "Member updated",
+  25: "Member roles changed",
+  26: "Member moved",
+  27: "Member disconnected",
+  28: "Bot added",
+};
 const SESSION_TTL_SECONDS = 12 * 60 * 60;
 
 const baseCorsHeaders = {
@@ -121,6 +208,40 @@ function liveUrlFor(username: string) {
   return `https://www.tiktok.com/@${username}/live`;
 }
 
+function textOrDefault(value: unknown, fallback: string, maxLength = 180) {
+  const text = String(value || "").trim();
+  return text ? text.slice(0, maxLength) : fallback;
+}
+
+function normalizeHomepageContent(value: unknown): HomepageContent {
+  const content = value && typeof value === "object" ? (value as Partial<HomepageContent>) : {};
+
+  return {
+    heroTitle: textOrDefault(content.heroTitle, DEFAULT_HOMEPAGE_CONTENT.heroTitle, 80),
+    heroSubtitle: textOrDefault(content.heroSubtitle, DEFAULT_HOMEPAGE_CONTENT.heroSubtitle, 220),
+    tiktokButtonLabel: textOrDefault(content.tiktokButtonLabel, DEFAULT_HOMEPAGE_CONTENT.tiktokButtonLabel, 40),
+    discordButtonLabel: textOrDefault(content.discordButtonLabel, DEFAULT_HOMEPAGE_CONTENT.discordButtonLabel, 40),
+    cards: DEFAULT_HOMEPAGE_CONTENT.cards.map((defaultCard, index) => {
+      const card = Array.isArray(content.cards) ? content.cards[index] : undefined;
+      return {
+        title: textOrDefault(card?.title, defaultCard.title, 60),
+        body: textOrDefault(card?.body, defaultCard.body, 180),
+      };
+    }),
+  };
+}
+
+async function getStoredHomepageContent(kv: StatusKv) {
+  const raw = await kv.get("homepage_content");
+  if (!raw) return DEFAULT_HOMEPAGE_CONTENT;
+
+  try {
+    return normalizeHomepageContent(JSON.parse(raw));
+  } catch {
+    return DEFAULT_HOMEPAGE_CONTENT;
+  }
+}
+
 async function getStoredConfig(env: Env): Promise<StoredConfig> {
   const kv = requireKv(env);
   const tiktokUsername = normalizeTikTokUsername(
@@ -134,6 +255,7 @@ async function getStoredConfig(env: Env): Promise<StoredConfig> {
     tiktokLink: liveUrlFor(tiktokUsername),
     customMessage: (await kv.get("custom_message")) || DEFAULT_CUSTOM_MESSAGE,
     mentionEveryone: (await kv.get("mention_everyone")) === "true",
+    homepageContent: await getStoredHomepageContent(kv),
   };
 }
 
@@ -378,31 +500,185 @@ async function handleUpdateProfile(request: Request, env: Env) {
   return jsonResponse({ success: true, user: updatedAccount.username, role: updatedAccount.role });
 }
 
-async function handleChannels(request: Request, env: Env) {
-  await requireAdmin(request, env);
-  const kv = requireKv(env);
-  const url = new URL(request.url);
-  const guildId = url.searchParams.get("guildId")?.trim() || (await kv.get("guild_id")) || env.GUILD_ID || "";
-
+async function fetchDiscordJson<T>(env: Env, path: string): Promise<T> {
   if (!env.DISCORD_TOKEN) {
     throw new HttpError("DISCORD_TOKEN is missing in Cloudflare secrets.", 500, "DISCORD_TOKEN_MISSING");
   }
 
-  if (!guildId) {
-    throw new HttpError("Enter a Discord Guild ID before fetching channels.", 400, "GUILD_ID_MISSING");
-  }
-
-  const response = await fetch(`https://discord.com/api/v10/guilds/${guildId}/channels`, {
+  const response = await fetch(`https://discord.com/api/v10${path}`, {
     headers: { Authorization: `Bot ${env.DISCORD_TOKEN}` },
   });
 
-  const text = await response.text();
   if (!response.ok) {
-    throw new HttpError(`Discord API returned ${response.status}: ${text}`, 502, "DISCORD_API_ERROR");
+    const detail = await response.text();
+    throw new HttpError(`Discord API returned ${response.status}: ${detail}`, 502, "DISCORD_API_ERROR");
   }
 
-  return new Response(text, {
-    headers: withCors({ "Content-Type": "application/json" }),
+  return (await response.json()) as T;
+}
+
+function displayDiscordUser(user?: DiscordUser) {
+  if (!user) return "Unknown user";
+  return user.global_name || user.username || user.id;
+}
+
+function isoFromDiscordSnowflake(id: string) {
+  try {
+    const timestamp = Number((BigInt(id) >> 22n) + 1420070400000n);
+    return new Date(timestamp).toISOString();
+  } catch {
+    return null;
+  }
+}
+
+async function resolveChannelsGuild(request: Request, env: Env, kv: StatusKv) {
+  const url = new URL(request.url);
+  const requestedGuildId = url.searchParams.get("guildId")?.trim();
+
+  if (requestedGuildId) {
+    return { guildId: requestedGuildId, guildName: "" };
+  }
+
+  const storedGuildId = (await kv.get("guild_id")) || env.GUILD_ID || "";
+  let guilds: DiscordGuild[] = [];
+
+  try {
+    guilds = await fetchDiscordJson<DiscordGuild[]>(env, "/users/@me/guilds?limit=200");
+  } catch (error) {
+    if (storedGuildId) {
+      return { guildId: storedGuildId, guildName: "" };
+    }
+
+    throw error;
+  }
+
+  if (storedGuildId) {
+    const storedGuild = guilds.find((guild) => guild.id === storedGuildId);
+    if (storedGuild) {
+      return { guildId: storedGuild.id, guildName: storedGuild.name };
+    }
+  }
+
+  if (guilds.length === 1) {
+    await kv.put("guild_id", guilds[0].id);
+    return { guildId: guilds[0].id, guildName: guilds[0].name };
+  }
+
+  if (guilds.length === 0) {
+    throw new HttpError("The bot is not installed in any Discord servers yet.", 400, "NO_BOT_GUILDS");
+  }
+
+  const guildChoices = guilds
+    .slice(0, 5)
+    .map((guild) => `${guild.name} (${guild.id})`)
+    .join(", ");
+  throw new HttpError(
+    `The bot is in multiple Discord servers. Enter one Guild ID first: ${guildChoices}`,
+    400,
+    "GUILD_SELECTION_REQUIRED",
+  );
+}
+
+async function handleChannels(request: Request, env: Env) {
+  await requireAdmin(request, env);
+  const kv = requireKv(env);
+  const guild = await resolveChannelsGuild(request, env, kv);
+  const channels = await fetchDiscordJson<DiscordChannel[]>(env, `/guilds/${guild.guildId}/channels`);
+
+  await kv.put("guild_id", guild.guildId);
+
+  return jsonResponse({
+    guildId: guild.guildId,
+    guildName: guild.guildName,
+    channels,
+  });
+}
+
+async function handleDiscordStatus(request: Request, env: Env) {
+  await requireAdmin(request, env);
+  const kv = requireKv(env);
+  const guild = await resolveChannelsGuild(request, env, kv);
+  const [bot, guildDetails, channels] = await Promise.all([
+    fetchDiscordJson<DiscordUser>(env, "/users/@me"),
+    fetchDiscordJson<DiscordGuild>(env, `/guilds/${guild.guildId}?with_counts=true`),
+    fetchDiscordJson<DiscordChannel[]>(env, `/guilds/${guild.guildId}/channels`),
+  ]);
+
+  let recentMembers: Array<{ id: string; name: string; joinedAt: string | null; bot: boolean }> = [];
+  let memberListError = "";
+
+  try {
+    const members = await fetchDiscordJson<DiscordMember[]>(env, `/guilds/${guild.guildId}/members?limit=50`);
+    recentMembers = members
+      .filter((member) => member.user?.id)
+      .sort((a, b) => String(b.joined_at || "").localeCompare(String(a.joined_at || "")))
+      .slice(0, 10)
+      .map((member) => ({
+        id: member.user?.id || "",
+        name: member.nick || displayDiscordUser(member.user),
+        joinedAt: member.joined_at || null,
+        bot: Boolean(member.user?.bot),
+      }));
+  } catch (error) {
+    memberListError =
+      error instanceof Error
+        ? error.message
+        : "Could not read guild members. The bot may need the Server Members intent enabled.";
+  }
+
+  let auditEvents: Array<{
+    id: string;
+    action: string;
+    actor: string;
+    target: string;
+    reason: string | null;
+    createdAt: string | null;
+  }> = [];
+  let auditLogError = "";
+
+  try {
+    const auditLog = await fetchDiscordJson<DiscordAuditLog>(env, `/guilds/${guild.guildId}/audit-logs?limit=30`);
+    const usersById = new Map(auditLog.users.map((user) => [user.id, user]));
+    auditEvents = auditLog.audit_log_entries
+      .filter((entry) => DISCORD_MEMBER_AUDIT_ACTIONS[entry.action_type])
+      .slice(0, 10)
+      .map((entry) => ({
+        id: entry.id,
+        action: DISCORD_MEMBER_AUDIT_ACTIONS[entry.action_type],
+        actor: displayDiscordUser(entry.user_id ? usersById.get(entry.user_id) : undefined),
+        target: displayDiscordUser(entry.target_id ? usersById.get(entry.target_id) : undefined),
+        reason: entry.reason || null,
+        createdAt: isoFromDiscordSnowflake(entry.id),
+      }));
+  } catch (error) {
+    auditLogError = error instanceof Error ? error.message : "Could not read the Discord audit log.";
+  }
+
+  await kv.put("guild_id", guild.guildId);
+
+  return jsonResponse({
+    bot: {
+      id: bot.id,
+      username: bot.username,
+      displayName: displayDiscordUser(bot),
+    },
+    guild: {
+      id: guild.guildId,
+      name: guild.guildName || guildDetails.name,
+      memberCount: guildDetails.approximate_member_count ?? null,
+      presenceCount: guildDetails.approximate_presence_count ?? null,
+      premiumTier: guildDetails.premium_tier ?? 0,
+      boosts: guildDetails.premium_subscription_count ?? 0,
+      channelCount: channels.length,
+      textChannelCount: channels.filter((channel) => channel.type === 0).length,
+      announcementChannelCount: channels.filter((channel) => channel.type === 5).length,
+      voiceChannelCount: channels.filter((channel) => channel.type === 2).length,
+      categoryCount: channels.filter((channel) => channel.type === 4).length,
+    },
+    recentMembers,
+    auditEvents,
+    memberListError,
+    auditLogError,
   });
 }
 
@@ -417,6 +693,7 @@ async function handleSaveConfig(request: Request, env: Env) {
   await kv.put("tiktok_username", username);
   await putOrDelete(kv, "custom_message", body.customMessage || DEFAULT_CUSTOM_MESSAGE);
   await kv.put("mention_everyone", body.mentionEveryone ? "true" : "false");
+  await kv.put("homepage_content", JSON.stringify(normalizeHomepageContent(body.homepageContent)));
 
   return jsonResponse({ success: true, config: await getStoredConfig(env) });
 }
@@ -448,6 +725,7 @@ async function handleStatus(env: Env) {
     lastLiveChange: await kv.get("last_live_change"),
     lastError: await kv.get("last_error"),
     source: await kv.get("last_status_source"),
+    homepageContent: config.homepageContent,
   });
 }
 
@@ -529,6 +807,10 @@ export default {
 
       if (url.pathname === "/admin/channels" && request.method === "GET") {
         return await handleChannels(request, env);
+      }
+
+      if (url.pathname === "/admin/discord-status" && request.method === "GET") {
+        return await handleDiscordStatus(request, env);
       }
 
       if (url.pathname === "/admin/test-notify" && request.method === "POST") {

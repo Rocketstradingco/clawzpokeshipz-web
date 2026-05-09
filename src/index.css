@@ -534,6 +534,10 @@ header {
   box-shadow: 0 0 30px rgba(255, 203, 5, 0.1);
 }
 
+.admin-box.dashboard {
+  max-width: 1080px;
+}
+
 .terminal-header {
   background: var(--card-bg);
   color: var(--poke-yellow);
@@ -620,6 +624,157 @@ header {
   font-size: 0.8rem;
   color: var(--text-muted);
   margin-bottom: 10px;
+}
+
+.field-note {
+  display: block;
+  margin-top: 8px;
+  color: var(--poke-yellow);
+  font-size: 0.78rem;
+}
+
+.admin-alert {
+  margin-top: 14px;
+  color: var(--accent-red);
+  font-size: 0.85rem;
+}
+
+.admin-subsection {
+  margin-top: 34px;
+  padding-top: 28px;
+  border-top: 1px solid #2b2b2b;
+}
+
+.discord-summary {
+  margin-top: 18px;
+  display: grid;
+  gap: 18px;
+}
+
+.discord-identity,
+.discord-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.discord-stat-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.discord-identity > div,
+.discord-stat-grid > div {
+  padding: 14px;
+  border: 1px solid #2b2b2b;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.discord-identity span,
+.discord-stat-grid span {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+}
+
+.discord-identity strong,
+.discord-stat-grid strong {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--white);
+  font-size: 1rem;
+}
+
+.discord-stat-grid strong {
+  color: var(--poke-yellow);
+  font-size: 1.35rem;
+}
+
+.discord-breakdown {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.discord-breakdown span {
+  padding: 6px 10px;
+  border: 1px solid #2b2b2b;
+  border-radius: 8px;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
+.discord-lists {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.discord-lists > div {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid #2b2b2b;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.discord-lists h4 {
+  margin-bottom: 12px;
+  color: var(--poke-yellow);
+  font-size: 0.86rem;
+  letter-spacing: 1px;
+}
+
+.discord-lists ul {
+  display: grid;
+  gap: 10px;
+  list-style: none;
+}
+
+.discord-lists li {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.discord-lists li span {
+  overflow-wrap: anywhere;
+}
+
+.discord-lists small,
+.discord-lists p {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.homepage-button-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.homepage-cards-editor {
+  display: grid;
+  gap: 18px;
+}
+
+.homepage-card-editor {
+  padding: 18px;
+  border: 1px solid #2b2b2b;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.homepage-card-editor h4 {
+  margin-bottom: 16px;
+  color: var(--poke-yellow);
+  font-size: 0.9rem;
+  letter-spacing: 1px;
 }
 
 .btn-small {
@@ -751,6 +906,17 @@ footer {
   .dashboard-grid {
     grid-template-columns: 1fr;
     gap: 28px;
+  }
+
+  .homepage-button-grid {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+
+  .discord-identity,
+  .discord-stat-grid,
+  .discord-lists {
+    grid-template-columns: 1fr;
   }
 
   .admin-sidebar {

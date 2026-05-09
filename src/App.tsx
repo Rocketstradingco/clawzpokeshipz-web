@@ -1,16 +1,62 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   Bell,
+  Bot,
   ExternalLink,
   LayoutDashboard,
   Lock,
   LogOut,
   Radio,
+  RefreshCw,
   Send,
+  Server,
   Settings,
+  Users,
 } from 'lucide-react';
 
 type Channel = { id: string; name: string; type: number };
+
+type ChannelResponse = {
+  guildId: string;
+  guildName?: string;
+  channels: Channel[];
+};
+
+type DiscordSummary = {
+  bot: {
+    id: string;
+    username: string;
+    displayName: string;
+  };
+  guild: {
+    id: string;
+    name: string;
+    memberCount: number | null;
+    presenceCount: number | null;
+    boosts: number;
+    channelCount: number;
+    textChannelCount: number;
+    announcementChannelCount: number;
+    voiceChannelCount: number;
+    categoryCount: number;
+  };
+  recentMembers: Array<{
+    id: string;
+    name: string;
+    joinedAt: string | null;
+    bot: boolean;
+  }>;
+  auditEvents: Array<{
+    id: string;
+    action: string;
+    actor: string;
+    target: string;
+    reason: string | null;
+    createdAt: string | null;
+  }>;
+  memberListError?: string;
+  auditLogError?: string;
+};
 
 type StatusPayload = {
   isLive: boolean;
@@ -18,6 +64,20 @@ type StatusPayload = {
   liveUrl?: string;
   lastChecked?: string | null;
   source?: string | null;
+  homepageContent?: HomepageContent;
+};
+
+type HomepageCard = {
+  title: string;
+  body: string;
+};
+
+type HomepageContent = {
+  heroTitle: string;
+  heroSubtitle: string;
+  tiktokButtonLabel: string;
+  discordButtonLabel: string;
+  cards: HomepageCard[];
 };
 
 type ConfigPayload = {
@@ -27,7 +87,42 @@ type ConfigPayload = {
   tiktokLink: string;
   customMessage: string;
   mentionEveryone: boolean;
+  homepageContent?: HomepageContent;
 };
+
+const DEFAULT_HOMEPAGE_CONTENT: HomepageContent = {
+  heroTitle: 'The PokeShipz Hub',
+  heroSubtitle: 'Catch pack openings, battles, and collector updates live on TikTok.',
+  tiktokButtonLabel: 'Visit TikTok',
+  discordButtonLabel: 'Join Discord',
+  cards: [
+    {
+      title: 'Live Streams',
+      body: 'Pack openings and battles from the live table.',
+    },
+    {
+      title: 'Community',
+      body: 'Discord updates when the TikTok stream goes live.',
+    },
+    {
+      title: 'Updates',
+      body: 'Collector drops, announcements, and schedule changes.',
+    },
+  ],
+};
+
+function normalizeHomepageContent(content?: Partial<HomepageContent> | null): HomepageContent {
+  return {
+    heroTitle: content?.heroTitle || DEFAULT_HOMEPAGE_CONTENT.heroTitle,
+    heroSubtitle: content?.heroSubtitle || DEFAULT_HOMEPAGE_CONTENT.heroSubtitle,
+    tiktokButtonLabel: content?.tiktokButtonLabel || DEFAULT_HOMEPAGE_CONTENT.tiktokButtonLabel,
+    discordButtonLabel: content?.discordButtonLabel || DEFAULT_HOMEPAGE_CONTENT.discordButtonLabel,
+    cards: DEFAULT_HOMEPAGE_CONTENT.cards.map((defaultCard, index) => ({
+      title: content?.cards?.[index]?.title || defaultCard.title,
+      body: content?.cards?.[index]?.body || defaultCard.body,
+    })),
+  };
+}
 
 async function parseApiResponse(response: Response) {
   const contentType = response.headers.get('content-type') || '';
@@ -40,6 +135,17 @@ async function parseApiResponse(response: Response) {
 
 function formatCheckedAt(value?: string | null) {
   if (!value) return 'Not checked yet';
+
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(new Date(value));
+}
+
+function formatDateTime(value?: string | null) {
+  if (!value) return 'Unknown time';
 
   return new Intl.DateTimeFormat(undefined, {
     month: 'short',
@@ -64,21 +170,27 @@ function App() {
   const [newName, setNewName] = useState('');
 
   const [guildId, setGuildId] = useState('');
+  const [guildName, setGuildName] = useState('');
   const [channels, setChannels] = useState<Channel[]>([]);
   const [selectedChannel, setSelectedChannel] = useState('');
+  const [discordSummary, setDiscordSummary] = useState<DiscordSummary | null>(null);
+  const [discordSummaryError, setDiscordSummaryError] = useState('');
   const [tiktokUsername, setTiktokUsername] = useState('clawzpokeshipz');
   const [tiktokLink, setTiktokLink] = useState('https://www.tiktok.com/@clawzpokeshipz/live');
   const [customMessage, setCustomMessage] = useState('is now LIVE on TikTok!');
   const [mentionEveryone, setMentionEveryone] = useState(false);
+  const [homepageContent, setHomepageContent] = useState<HomepageContent>(DEFAULT_HOMEPAGE_CONTENT);
   const [isBusy, setIsBusy] = useState(false);
 
   const applyConfig = useCallback((config: ConfigPayload) => {
     setGuildId(config.guildId || '');
+    setGuildName('');
     setSelectedChannel(config.channelId || '');
     setTiktokUsername(config.tiktokUsername || 'clawzpokeshipz');
     setTiktokLink(config.tiktokLink || `https://www.tiktok.com/@${config.tiktokUsername || 'clawzpokeshipz'}/live`);
     setCustomMessage(config.customMessage || 'is now LIVE on TikTok!');
     setMentionEveryone(Boolean(config.mentionEveryone));
+    setHomepageContent(normalizeHomepageContent(config.homepageContent));
   }, []);
 
   const apiRequest = useCallback(
@@ -119,6 +231,7 @@ function App() {
           setStatusSource(data.source || null);
           if (data.username) setTiktokUsername(data.username);
           if (data.liveUrl) setTiktokLink(data.liveUrl);
+          if (data.homepageContent) setHomepageContent(normalizeHomepageContent(data.homepageContent));
         }
       } catch (err) {
         console.error('Failed to fetch live status:', err);
@@ -200,10 +313,34 @@ function App() {
     setIsBusy(true);
     try {
       const query = guildId ? `?guildId=${encodeURIComponent(guildId)}` : '';
-      const data = (await apiRequest(`/admin/channels${query}`)) as Channel[];
-      setChannels(data.filter((channel) => channel.type === 0));
+      const data = (await apiRequest(`/admin/channels${query}`)) as Channel[] | ChannelResponse;
+      const nextChannels = Array.isArray(data) ? data : data.channels;
+
+      if (!Array.isArray(data)) {
+        setGuildId(data.guildId);
+        setGuildName(data.guildName || '');
+      }
+
+      setChannels(nextChannels.filter((channel) => channel.type === 0 || channel.type === 5));
     } catch (err) {
       alert(`Could not fetch channels: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const fetchDiscordSummary = async () => {
+    setIsBusy(true);
+    setDiscordSummaryError('');
+    try {
+      const query = guildId ? `?guildId=${encodeURIComponent(guildId)}` : '';
+      const data = (await apiRequest(`/admin/discord-status${query}`)) as DiscordSummary;
+      setDiscordSummary(data);
+      setGuildId(data.guild.id);
+      setGuildName(data.guild.name);
+    } catch (err) {
+      setDiscordSummary(null);
+      setDiscordSummaryError(err instanceof Error ? err.message : String(err));
     } finally {
       setIsBusy(false);
     }
@@ -220,6 +357,7 @@ function App() {
           tiktokUsername,
           customMessage,
           mentionEveryone,
+          homepageContent,
         }),
       })) as { config: ConfigPayload };
 
@@ -257,6 +395,17 @@ function App() {
     const normalized = value.replace(/^@+/, '').trim();
     setTiktokUsername(normalized);
     setTiktokLink(`https://www.tiktok.com/@${normalized || 'clawzpokeshipz'}/live`);
+  };
+
+  const updateHomepageField = (field: keyof Omit<HomepageContent, 'cards'>, value: string) => {
+    setHomepageContent((current) => ({ ...current, [field]: value }));
+  };
+
+  const updateHomepageCard = (index: number, field: keyof HomepageCard, value: string) => {
+    setHomepageContent((current) => ({
+      ...current,
+      cards: current.cards.map((card, cardIndex) => (cardIndex === index ? { ...card, [field]: value } : card)),
+    }));
   };
 
   return (
@@ -308,16 +457,16 @@ function App() {
               <span>{isLive ? 'Live on TikTok' : 'Currently offline'}</span>
               <small>{formatCheckedAt(lastChecked)}{statusSource ? ` via ${statusSource.replace('_', ' ')}` : ''}</small>
             </div>
-            <h2>The PokeShipz Hub</h2>
-            <p>Catch pack openings, battles, and collector updates live on TikTok.</p>
+            <h2>{homepageContent.heroTitle}</h2>
+            <p>{homepageContent.heroSubtitle}</p>
             <div className="cta-buttons">
               <a href={tiktokLink} target="_blank" rel="noreferrer" className="btn btn-primary">
                 <ExternalLink size={20} />
-                Visit TikTok
+                {homepageContent.tiktokButtonLabel}
               </a>
               <a href="https://discord.gg/9JVNTanBEP" target="_blank" rel="noreferrer" className="btn btn-secondary">
                 <Send size={20} />
-                Join Discord
+                {homepageContent.discordButtonLabel}
               </a>
             </div>
           </section>
@@ -395,10 +544,11 @@ function App() {
                         type="text"
                         value={guildId}
                         onChange={(event) => setGuildId(event.target.value)}
-                        placeholder="Enter Guild ID"
+                        placeholder="Leave blank to use the bot server"
                       />
+                      {guildName && <small className="field-note">Using {guildName}</small>}
                       <button className="btn btn-secondary btn-small" onClick={fetchChannels} disabled={isBusy} type="button">
-                        Fetch Channels
+                        Fetch Bot Server Channels
                       </button>
                     </div>
 
@@ -412,6 +562,93 @@ function App() {
                           </option>
                         ))}
                       </select>
+                    </div>
+
+                    <div className="admin-subsection discord-insights">
+                      <h3>
+                        <Server size={18} /> DISCORD SERVER
+                      </h3>
+                      <button className="btn btn-secondary btn-small" onClick={fetchDiscordSummary} disabled={isBusy} type="button">
+                        <RefreshCw size={15} /> Check Bot Connection
+                      </button>
+                      {discordSummaryError && <p className="admin-alert">{discordSummaryError}</p>}
+                      {discordSummary && (
+                        <div className="discord-summary">
+                          <div className="discord-identity">
+                            <div>
+                              <span>Bot</span>
+                              <strong>
+                                <Bot size={16} /> {discordSummary.bot.displayName}
+                              </strong>
+                            </div>
+                            <div>
+                              <span>Server</span>
+                              <strong>
+                                <Users size={16} /> {discordSummary.guild.name}
+                              </strong>
+                            </div>
+                          </div>
+
+                          <div className="discord-stat-grid">
+                            <div>
+                              <span>Members</span>
+                              <strong>{discordSummary.guild.memberCount ?? 'Unknown'}</strong>
+                            </div>
+                            <div>
+                              <span>Online</span>
+                              <strong>{discordSummary.guild.presenceCount ?? 'Unknown'}</strong>
+                            </div>
+                            <div>
+                              <span>Channels</span>
+                              <strong>{discordSummary.guild.channelCount}</strong>
+                            </div>
+                            <div>
+                              <span>Boosts</span>
+                              <strong>{discordSummary.guild.boosts}</strong>
+                            </div>
+                          </div>
+
+                          <div className="discord-breakdown">
+                            <span>{discordSummary.guild.textChannelCount} text</span>
+                            <span>{discordSummary.guild.announcementChannelCount} announcement</span>
+                            <span>{discordSummary.guild.voiceChannelCount} voice</span>
+                            <span>{discordSummary.guild.categoryCount} categories</span>
+                          </div>
+
+                          <div className="discord-lists">
+                            <div>
+                              <h4>Recent Joins</h4>
+                              {discordSummary.recentMembers.length > 0 ? (
+                                <ul>
+                                  {discordSummary.recentMembers.map((member) => (
+                                    <li key={member.id}>
+                                      <span>{member.name}{member.bot ? ' BOT' : ''}</span>
+                                      <small>{formatDateTime(member.joinedAt)}</small>
+                                    </li>
+                                  ))}
+                                </ul>
+                              ) : (
+                                <p>{discordSummary.memberListError || 'No recent joins returned.'}</p>
+                              )}
+                            </div>
+                            <div>
+                              <h4>Member Audit Log</h4>
+                              {discordSummary.auditEvents.length > 0 ? (
+                                <ul>
+                                  {discordSummary.auditEvents.map((event) => (
+                                    <li key={event.id}>
+                                      <span>{event.action}: {event.target}</span>
+                                      <small>{formatDateTime(event.createdAt)} by {event.actor}</small>
+                                    </li>
+                                  ))}
+                                </ul>
+                              ) : (
+                                <p>{discordSummary.auditLogError || 'No recent member events found.'}</p>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     <div className="field">
@@ -449,6 +686,71 @@ function App() {
                         />
                         Mention @everyone
                       </label>
+                    </div>
+
+                    <div className="admin-subsection homepage-editor">
+                      <h3>
+                        <LayoutDashboard size={18} /> HOME PAGE TEXT
+                      </h3>
+                      <div className="field">
+                        <label>Hero Title</label>
+                        <input
+                          type="text"
+                          value={homepageContent.heroTitle}
+                          onChange={(event) => updateHomepageField('heroTitle', event.target.value)}
+                        />
+                      </div>
+                      <div className="field">
+                        <label>Hero Description</label>
+                        <textarea
+                          value={homepageContent.heroSubtitle}
+                          onChange={(event) => updateHomepageField('heroSubtitle', event.target.value)}
+                          rows={2}
+                          className="terminal-input"
+                        />
+                      </div>
+                      <div className="homepage-button-grid">
+                        <div className="field">
+                          <label>TikTok Button Text</label>
+                          <input
+                            type="text"
+                            value={homepageContent.tiktokButtonLabel}
+                            onChange={(event) => updateHomepageField('tiktokButtonLabel', event.target.value)}
+                          />
+                        </div>
+                        <div className="field">
+                          <label>Discord Button Text</label>
+                          <input
+                            type="text"
+                            value={homepageContent.discordButtonLabel}
+                            onChange={(event) => updateHomepageField('discordButtonLabel', event.target.value)}
+                          />
+                        </div>
+                      </div>
+                      <div className="homepage-cards-editor">
+                        {homepageContent.cards.map((card, index) => (
+                          <div className="homepage-card-editor" key={`homepage-card-editor-${index}`}>
+                            <h4>Box {index + 1}</h4>
+                            <div className="field">
+                              <label>Title</label>
+                              <input
+                                type="text"
+                                value={card.title}
+                                onChange={(event) => updateHomepageCard(index, 'title', event.target.value)}
+                              />
+                            </div>
+                            <div className="field">
+                              <label>Text</label>
+                              <textarea
+                                value={card.body}
+                                onChange={(event) => updateHomepageCard(index, 'body', event.target.value)}
+                                rows={2}
+                                className="terminal-input"
+                              />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
 
                     <div className="dashboard-actions">
@@ -497,18 +799,12 @@ function App() {
 
         {view === 'home' && (
           <section className="features">
-            <div className="card">
-              <h3>Live Streams</h3>
-              <p>Pack openings and battles from the live table.</p>
-            </div>
-            <div className="card">
-              <h3>Community</h3>
-              <p>Discord updates when the TikTok stream goes live.</p>
-            </div>
-            <div className="card">
-              <h3>Updates</h3>
-              <p>Collector drops, announcements, and schedule changes.</p>
-            </div>
+            {homepageContent.cards.map((card, index) => (
+              <div className="card" key={`${card.title}-${index}`}>
+                <h3>{card.title}</h3>
+                <p>{card.body}</p>
+              </div>
+            ))}
           </section>
         )}
       </main>
