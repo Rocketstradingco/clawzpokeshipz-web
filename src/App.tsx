@@ -18,6 +18,9 @@ function App() {
   const [selectedChannel, setSelectedChannel] = useState('');
   const [tiktokLink, setTiktokLink] = useState('https://www.tiktok.com/@clawzpokeshipz/live');
 
+  const [customMessage, setCustomMessage] = useState('is now LIVE on TikTok!');
+  const [mentionEveryone, setMentionEveryone] = useState(false);
+
   const workerUrl = import.meta.env.VITE_WORKER_URL || 'https://your-worker.your-subdomain.workers.dev';
 
   // Polling for live status
@@ -99,12 +102,28 @@ function App() {
         body: JSON.stringify({ 
           guildId, 
           channelId: selectedChannel,
-          tiktokUsername: 'clawzpokeshipz' 
+          tiktokUsername: 'clawzpokeshipz',
+          customMessage,
+          mentionEveryone
         })
       });
       alert("Configuration Saved!");
     } catch (err) {
       alert("Failed to save configuration.");
+    }
+  };
+
+  const testNotify = async () => {
+    try {
+      const response = await fetch(`${workerUrl}/admin/test-notify`, { method: 'POST' });
+      if (response.ok) {
+        alert("Test notification sent to Discord!");
+      } else {
+        const err = await response.json();
+        alert(`Error: ${JSON.stringify(err)}`);
+      }
+    } catch (err) {
+      alert("Failed to send test notification.");
     }
   };
 
@@ -236,8 +255,33 @@ function App() {
                         onChange={(e) => setTiktokLink(e.target.value)}
                       />
                     </div>
+
+                    <div className="field">
+                      <label>Notification Message:</label>
+                      <textarea 
+                        value={customMessage} 
+                        onChange={(e) => setCustomMessage(e.target.value)}
+                        placeholder="e.g. is now LIVE! Catch the pack openings!"
+                        rows={2}
+                        className="terminal-input"
+                      />
+                    </div>
+
+                    <div className="field checkbox-field">
+                      <label>
+                        <input 
+                          type="checkbox" 
+                          checked={mentionEveryone} 
+                          onChange={(e) => setMentionEveryone(e.target.checked)}
+                        />
+                        Mention @everyone
+                      </label>
+                    </div>
                     
-                    <button className="btn btn-primary full-width" onClick={saveConfig}>SAVE CONFIGURATION</button>
+                    <div className="dashboard-actions">
+                      <button className="btn btn-primary" onClick={saveConfig}>SAVE CONFIGURATION</button>
+                      <button className="btn btn-secondary" onClick={testNotify}>SEND TEST NOTIFY</button>
+                    </div>
                   </div>
 
                   <div className="admin-sidebar">

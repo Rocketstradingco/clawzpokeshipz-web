@@ -69,7 +69,47 @@ export default {
       if (config.guildId) await env.STATUS_KV.put("guild_id", config.guildId);
       if (config.channelId) await env.STATUS_KV.put("channel_id", config.channelId);
       if (config.tiktokUsername) await env.STATUS_KV.put("tiktok_username", config.tiktokUsername);
+      if (config.customMessage) await env.STATUS_KV.put("custom_message", config.customMessage);
+      if (config.mentionEveryone !== undefined) await env.STATUS_KV.put("mention_everyone", config.mentionEveryone ? "true" : "false");
       return new Response("OK", { headers: corsHeaders });
+    }
+
+    // 6. Test Notification
+    if (url.pathname === "/admin/test-notify" && request.method === "POST") {
+      const username = await env.STATUS_KV.get("tiktok_username") || "clawzpokeshipz";
+      const channelId = await env.STATUS_KV.get("channel_id") || env.DISCORD_CHANNEL_ID;
+      const customMsg = await env.STATUS_KV.get("custom_message") || "is now LIVE on TikTok!";
+      const mentionEveryone = await env.STATUS_KV.get("mention_everyone") === "true";
+      
+      const content = `${mentionEveryone ? "@everyone " : ""}🚀 **${username}** ${customMsg}`;
+
+      try {
+        const discordRes = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
+          method: "POST",
+          headers: {
+            "Authorization": `Bot ${env.DISCORD_TOKEN}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            content: content,
+            embeds: [{
+              title: `Watch ${username}'s Stream`,
+              url: `https://www.tiktok.com/@${username}/live`,
+              color: 16711680,
+              timestamp: new Date().toISOString()
+            }]
+          })
+        });
+        
+        if (!discordRes.ok) {
+          const errorData = await discordRes.json();
+          return new Response(JSON.stringify(errorData), { status: discordRes.status, headers: corsHeaders });
+        }
+
+        return new Response("Test notification sent!", { headers: corsHeaders });
+      } catch (err) {
+        return new Response(err.message, { status: 500, headers: corsHeaders });
+      }
     }
 
     return new Response("Not Found", { status: 404, headers: corsHeaders });
@@ -79,26 +119,25 @@ export default {
   async scheduled(event, env, ctx) {
     const username = await env.STATUS_KV.get("tiktok_username") || "clawzpokeshipz";
     const channelId = await env.STATUS_KV.get("channel_id") || env.DISCORD_CHANNEL_ID;
+    const customMsg = await env.STATUS_KV.get("custom_message") || "is now LIVE on TikTok!";
+    const mentionEveryone = await env.STATUS_KV.get("mention_everyone") === "true";
     
     console.log(`Checking TikTok status for: ${username}`);
 
     try {
-      // Check TikTok Live Status
       const response = await fetch(`https://www.tiktok.com/@${username}/live`, {
         headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" }
       });
       const html = await response.text();
       
-      // Look for "LIVE" indicator in the page source
       const isCurrentlyLive = html.includes('"status":2') || html.includes('LIVE');
       const wasLive = await env.STATUS_KV.get("isLive") === "true";
 
       if (isCurrentlyLive && !wasLive) {
-        // Just went LIVE
         await env.STATUS_KV.put("isLive", "true");
         
-        // Send Discord Notification
         if (channelId && env.DISCORD_TOKEN) {
+          const content = `${mentionEveryone ? "@everyone " : ""}🚀 **${username}** ${customMsg}`;
           await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
             method: "POST",
             headers: {
@@ -106,7 +145,7 @@ export default {
               "Content-Type": "application/json"
             },
             body: JSON.stringify({
-              content: `🚀 **${username}** is now LIVE on TikTok!`,
+              content: content,
               embeds: [{
                 title: `Watch ${username}'s Stream`,
                 url: `https://www.tiktok.com/@${username}/live`,
@@ -117,7 +156,6 @@ export default {
           });
         }
       } else if (!isCurrentlyLive && wasLive) {
-        // Went OFFLINE
         await env.STATUS_KV.put("isLive", "false");
       }
     } catch (err) {
