@@ -752,6 +752,61 @@ header {
   line-height: 1.45;
 }
 
+.watch-add-grid {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.75fr) minmax(240px, 1.25fr);
+  gap: 18px;
+}
+
+.watch-account-list {
+  display: grid;
+  gap: 16px;
+  margin-top: 18px;
+}
+
+.watch-account-card {
+  padding: 18px;
+  border: 1px solid #2b2b2b;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.watch-account-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.watch-account-header strong {
+  display: block;
+  color: var(--white);
+  font-size: 1.05rem;
+  overflow-wrap: anywhere;
+}
+
+.watch-account-header span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  color: var(--poke-yellow);
+  font-size: 0.78rem;
+}
+
+.watch-account-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.btn-icon.danger:hover {
+  color: var(--accent-red);
+  background: rgba(255, 0, 0, 0.08);
+}
+
 .homepage-button-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -911,6 +966,20 @@ footer {
   .homepage-button-grid {
     grid-template-columns: 1fr;
     gap: 0;
+  }
+
+  .watch-add-grid {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+
+  .watch-account-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .watch-account-actions {
+    justify-content: space-between;
   }
 
   .discord-identity,

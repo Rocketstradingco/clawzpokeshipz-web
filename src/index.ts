@@ -43,6 +43,21 @@ type DiscordMessageOptions = {
   isTest?: boolean;
 };
 
+type TikTokWatchAccount = {
+  username: string;
+  liveUrl: string;
+  customMessage: string;
+  verifiedAt?: string | null;
+};
+
+type TikTokAccountStatus = TikTokWatchAccount & {
+  isLive: boolean;
+  lastChecked: string | null;
+  lastLiveChange: string | null;
+  lastError: string | null;
+  source: string | null;
+};
+
 type HomepageCard = {
   title: string;
   body: string;
@@ -104,6 +119,7 @@ type StoredConfig = {
   tiktokUsername: string;
   tiktokLink: string;
   customMessage: string;
+  tiktokAccounts: TikTokWatchAccount[];
   mentionEveryone: boolean;
   homepageContent: HomepageContent;
 };
@@ -112,6 +128,12 @@ const DEFAULT_TIKTOK_USERNAME = "clawzpokeshipz";
 const DEFAULT_ADMIN_NAME = "Claw";
 const DEFAULT_ADMIN_PASSWORD = "Claw69";
 const DEFAULT_CUSTOM_MESSAGE = "is now LIVE on TikTok!";
+const DEFAULT_TIKTOK_ACCOUNT: TikTokWatchAccount = {
+  username: DEFAULT_TIKTOK_USERNAME,
+  liveUrl: `https://www.tiktok.com/@${DEFAULT_TIKTOK_USERNAME}/live`,
+  customMessage: DEFAULT_CUSTOM_MESSAGE,
+  verifiedAt: null,
+};
 const DEFAULT_HOMEPAGE_CONTENT: HomepageContent = {
   heroTitle: "The PokeShipz Hub",
   heroSubtitle: "Catch pack openings, battles, and collector updates live on TikTok.",
@@ -193,19 +215,59 @@ async function readJsonBody<T extends Record<string, unknown>>(request: Request)
   }
 }
 
-function normalizeTikTokUsername(username: unknown) {
-  const normalized = String(username || "")
+function parseTikTokUsername(username: unknown) {
+  return String(username || "")
     .trim()
     .replace(/^@+/, "")
     .replace(/^https?:\/\/(www\.)?tiktok\.com\/@/i, "")
     .replace(/\/live\/?$/i, "")
     .replace(/\/.*$/, "");
+}
 
-  return normalized || DEFAULT_TIKTOK_USERNAME;
+function normalizeTikTokUsername(username: unknown) {
+  return parseTikTokUsername(username) || DEFAULT_TIKTOK_USERNAME;
 }
 
 function liveUrlFor(username: string) {
   return `https://www.tiktok.com/@${username}/live`;
+}
+
+function profileUrlFor(username: string) {
+  return `https://www.tiktok.com/@${username}`;
+}
+
+function normalizeTikTokAccounts(value: unknown, fallbackUsername?: unknown, fallbackMessage?: unknown): TikTokWatchAccount[] {
+  const rawAccounts = Array.isArray(value) ? value : [];
+  const seen = new Set<string>();
+  const accounts = rawAccounts
+    .map((raw) => {
+      const account = raw && typeof raw === "object" ? (raw as Partial<TikTokWatchAccount>) : {};
+      const username = parseTikTokUsername(account.username);
+      return {
+        username,
+        liveUrl: liveUrlFor(username),
+        customMessage: textOrDefault(account.customMessage, String(fallbackMessage || DEFAULT_CUSTOM_MESSAGE), 220),
+        verifiedAt: typeof account.verifiedAt === "string" ? account.verifiedAt : null,
+      };
+    })
+    .filter((account) => {
+      const key = account.username.toLowerCase();
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+  if (accounts.length > 0) return accounts;
+
+  const username = normalizeTikTokUsername(fallbackUsername);
+  return [
+    {
+      username,
+      liveUrl: liveUrlFor(username),
+      customMessage: textOrDefault(fallbackMessage, DEFAULT_CUSTOM_MESSAGE, 220),
+      verifiedAt: null,
+    },
+  ];
 }
 
 function textOrDefault(value: unknown, fallback: string, maxLength = 180) {
@@ -242,18 +304,33 @@ async function getStoredHomepageContent(kv: StatusKv) {
   }
 }
 
+async function getStoredTikTokAccounts(kv: StatusKv, fallbackUsername: string, fallbackMessage: string) {
+  const raw = await kv.get("tiktok_accounts");
+  if (!raw) return normalizeTikTokAccounts(null, fallbackUsername, fallbackMessage);
+
+  try {
+    return normalizeTikTokAccounts(JSON.parse(raw), fallbackUsername, fallbackMessage);
+  } catch {
+    return normalizeTikTokAccounts(null, fallbackUsername, fallbackMessage);
+  }
+}
+
 async function getStoredConfig(env: Env): Promise<StoredConfig> {
   const kv = requireKv(env);
   const tiktokUsername = normalizeTikTokUsername(
     (await kv.get("tiktok_username")) || env.TIKTOK_USERNAME || DEFAULT_TIKTOK_USERNAME,
   );
+  const customMessage = (await kv.get("custom_message")) || DEFAULT_CUSTOM_MESSAGE;
+  const tiktokAccounts = await getStoredTikTokAccounts(kv, tiktokUsername, customMessage);
+  const primaryAccount = tiktokAccounts[0] || DEFAULT_TIKTOK_ACCOUNT;
 
   return {
     guildId: (await kv.get("guild_id")) || env.GUILD_ID || "",
     channelId: (await kv.get("channel_id")) || env.DISCORD_CHANNEL_ID || "",
-    tiktokUsername,
-    tiktokLink: liveUrlFor(tiktokUsername),
-    customMessage: (await kv.get("custom_message")) || DEFAULT_CUSTOM_MESSAGE,
+    tiktokUsername: primaryAccount.username,
+    tiktokLink: primaryAccount.liveUrl,
+    customMessage: primaryAccount.customMessage,
+    tiktokAccounts,
     mentionEveryone: (await kv.get("mention_everyone")) === "true",
     homepageContent: await getStoredHomepageContent(kv),
   };
@@ -411,21 +488,128 @@ async function fetchTikTokLiveStatus(username: string) {
   return liveSignals.some((pattern) => pattern.test(html));
 }
 
-async function updateStoredLiveStatus(env: Env, isLive: boolean, username: string, source: string) {
-  const kv = requireKv(env);
+async function verifyTikTokAccount(usernameInput: unknown): Promise<TikTokWatchAccount> {
+  const username = parseTikTokUsername(usernameInput);
+  if (!username) {
+    throw new HttpError("Enter a TikTok username.", 400, "TIKTOK_USERNAME_MISSING");
+  }
+
+  const response = await fetch(profileUrlFor(username), {
+    headers: {
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    },
+  });
+
+  if (response.status === 404) {
+    throw new HttpError(`TikTok account @${username} was not found.`, 404, "TIKTOK_ACCOUNT_NOT_FOUND");
+  }
+
+  if (response.status >= 500) {
+    throw new HttpError(`TikTok returned ${response.status}. Try again in a minute.`, 502, "TIKTOK_UNAVAILABLE");
+  }
+
+  const html = await response.text();
+  const notFoundSignals = [
+    /couldn(?:'|&#x27;)?t find this account/i,
+    /"statusCode"\s*:\s*10202/i,
+    /"userInfo"\s*:\s*\{\s*\}/i,
+  ];
+
+  if (notFoundSignals.some((pattern) => pattern.test(html))) {
+    throw new HttpError(`TikTok account @${username} was not found.`, 404, "TIKTOK_ACCOUNT_NOT_FOUND");
+  }
+
+  const canonicalMatch = html.match(/"uniqueId"\s*:\s*"([^"]+)"/i);
+  const canonicalUsername = canonicalMatch ? parseTikTokUsername(canonicalMatch[1]) || username : username;
+
+  return {
+    username: canonicalUsername,
+    liveUrl: liveUrlFor(canonicalUsername),
+    customMessage: DEFAULT_CUSTOM_MESSAGE,
+    verifiedAt: new Date().toISOString(),
+  };
+}
+
+function statusKeyFor(username: string) {
+  return `tiktok_status:${username.toLowerCase()}`;
+}
+
+async function getTikTokAccountStatus(kv: StatusKv, account: TikTokWatchAccount): Promise<TikTokAccountStatus> {
+  const raw = await kv.get(statusKeyFor(account.username));
+
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw) as Partial<TikTokAccountStatus>;
+      return {
+        ...account,
+        isLive: Boolean(parsed.isLive),
+        lastChecked: parsed.lastChecked || null,
+        lastLiveChange: parsed.lastLiveChange || null,
+        lastError: parsed.lastError || null,
+        source: parsed.source || null,
+      };
+    } catch {
+      // Fall through to the default status shape.
+    }
+  }
+
+  return {
+    ...account,
+    isLive: false,
+    lastChecked: null,
+    lastLiveChange: null,
+    lastError: null,
+    source: null,
+  };
+}
+
+async function getTikTokAccountStatuses(kv: StatusKv, accounts: TikTokWatchAccount[]) {
+  return Promise.all(accounts.map((account) => getTikTokAccountStatus(kv, account)));
+}
+
+async function setTikTokAccountStatus(
+  kv: StatusKv,
+  account: TikTokWatchAccount,
+  isLive: boolean,
+  source: string,
+  errorMessage = "",
+) {
+  const now = new Date().toISOString();
+  const previous = await getTikTokAccountStatus(kv, account);
+  const next: TikTokAccountStatus = {
+    ...account,
+    isLive,
+    lastChecked: now,
+    lastLiveChange: previous.isLive !== isLive ? now : previous.lastLiveChange,
+    lastError: errorMessage || null,
+    source,
+  };
+
+  await kv.put(statusKeyFor(account.username), JSON.stringify(next));
+  return { previous: previous.isLive, status: next };
+}
+
+async function updateAggregateLiveStatus(kv: StatusKv, statuses: TikTokAccountStatus[], source: string) {
   const now = new Date().toISOString();
   const previous = (await kv.get("isLive")) === "true";
+  const isLive = statuses.some((status) => status.isLive);
+  const errors = statuses.filter((status) => status.lastError).map((status) => `@${status.username}: ${status.lastError}`);
 
   await kv.put("isLive", isLive ? "true" : "false");
   await kv.put("last_checked", now);
   await kv.put("last_status_source", source);
-  await kv.put("tiktok_username", username);
 
   if (previous !== isLive) {
     await kv.put("last_live_change", now);
   }
 
-  return previous;
+  if (errors.length > 0) {
+    await kv.put("last_error", errors.join("; ").slice(0, 1000));
+  } else {
+    await kv.delete("last_error");
+  }
 }
 
 async function handleLogin(request: Request, env: Env) {
@@ -682,16 +866,35 @@ async function handleDiscordStatus(request: Request, env: Env) {
   });
 }
 
+async function handleVerifyTikTokAccount(request: Request, env: Env) {
+  await requireAdmin(request, env);
+  const body = await readJsonBody<{ username?: string; customMessage?: string }>(request);
+  const account = await verifyTikTokAccount(body.username);
+
+  return jsonResponse({
+    success: true,
+    account: {
+      ...account,
+      customMessage: textOrDefault(body.customMessage, DEFAULT_CUSTOM_MESSAGE, 220),
+    },
+  });
+}
+
 async function handleSaveConfig(request: Request, env: Env) {
   await requireAdmin(request, env);
   const kv = requireKv(env);
   const body = await readJsonBody<Record<string, unknown>>(request);
-  const username = normalizeTikTokUsername(body.tiktokUsername);
+  const existingConfig = await getStoredConfig(env);
+  const accounts = normalizeTikTokAccounts(body.tiktokAccounts, body.tiktokUsername, body.customMessage);
+  const primaryAccount = accounts[0] || DEFAULT_TIKTOK_ACCOUNT;
+  const guildId = String(body.guildId || "").trim() || existingConfig.guildId;
+  const channelId = String(body.channelId || "").trim() || existingConfig.channelId;
 
-  await putOrDelete(kv, "guild_id", body.guildId);
-  await putOrDelete(kv, "channel_id", body.channelId);
-  await kv.put("tiktok_username", username);
-  await putOrDelete(kv, "custom_message", body.customMessage || DEFAULT_CUSTOM_MESSAGE);
+  await putOrDelete(kv, "guild_id", guildId);
+  await putOrDelete(kv, "channel_id", channelId);
+  await kv.put("tiktok_username", primaryAccount.username);
+  await putOrDelete(kv, "custom_message", primaryAccount.customMessage || DEFAULT_CUSTOM_MESSAGE);
+  await kv.put("tiktok_accounts", JSON.stringify(accounts));
   await kv.put("mention_everyone", body.mentionEveryone ? "true" : "false");
   await kv.put("homepage_content", JSON.stringify(normalizeHomepageContent(body.homepageContent)));
 
@@ -702,29 +905,36 @@ async function handleTestNotify(request: Request, env: Env) {
   await requireAdmin(request, env);
   const config = await getStoredConfig(env);
 
-  await sendDiscordMessage(env, {
-    username: config.tiktokUsername,
-    channelId: config.channelId,
-    customMsg: config.customMessage,
-    mentionEveryone: config.mentionEveryone,
-    isTest: true,
-  });
+  for (const account of config.tiktokAccounts) {
+    await sendDiscordMessage(env, {
+      username: account.username,
+      channelId: config.channelId,
+      customMsg: account.customMessage,
+      mentionEveryone: config.mentionEveryone,
+      isTest: true,
+    });
+  }
 
-  return jsonResponse({ success: true });
+  return jsonResponse({ success: true, count: config.tiktokAccounts.length });
 }
 
 async function handleStatus(env: Env) {
   const kv = requireKv(env);
   const config = await getStoredConfig(env);
+  const accountStatuses = await getTikTokAccountStatuses(kv, config.tiktokAccounts);
+  const liveAccounts = accountStatuses.filter((account) => account.isLive);
+  const primaryAccount = liveAccounts[0] || accountStatuses[0] || DEFAULT_TIKTOK_ACCOUNT;
 
   return jsonResponse({
-    isLive: (await kv.get("isLive")) === "true",
-    username: config.tiktokUsername,
-    liveUrl: config.tiktokLink,
+    isLive: accountStatuses.some((account) => account.isLive),
+    username: primaryAccount.username,
+    liveUrl: primaryAccount.liveUrl,
     lastChecked: await kv.get("last_checked"),
     lastLiveChange: await kv.get("last_live_change"),
     lastError: await kv.get("last_error"),
     source: await kv.get("last_status_source"),
+    tiktokAccounts: accountStatuses,
+    liveAccounts,
     homepageContent: config.homepageContent,
   });
 }
@@ -741,7 +951,18 @@ async function handleExternalUpdate(request: Request, env: Env) {
   }
 
   const username = normalizeTikTokUsername(body.username || env.TIKTOK_USERNAME || DEFAULT_TIKTOK_USERNAME);
-  await updateStoredLiveStatus(env, body.live, username, "external_bot");
+  const kv = requireKv(env);
+  const config = await getStoredConfig(env);
+  const account =
+    config.tiktokAccounts.find((item) => item.username.toLowerCase() === username.toLowerCase()) || {
+      username,
+      liveUrl: liveUrlFor(username),
+      customMessage: DEFAULT_CUSTOM_MESSAGE,
+      verifiedAt: null,
+    };
+  await setTikTokAccountStatus(kv, account, body.live, "external_bot");
+  const statuses = await getTikTokAccountStatuses(kv, config.tiktokAccounts);
+  await updateAggregateLiveStatus(kv, statuses, "external_bot");
 
   return jsonResponse({ success: true, isLive: body.live, username });
 }
@@ -749,26 +970,32 @@ async function handleExternalUpdate(request: Request, env: Env) {
 async function runTikTokCheck(env: Env) {
   const config = await getStoredConfig(env);
   const kv = requireKv(env);
+  const statuses: TikTokAccountStatus[] = [];
 
-  try {
-    const isCurrentlyLive = await fetchTikTokLiveStatus(config.tiktokUsername);
-    const wasLive = await updateStoredLiveStatus(env, isCurrentlyLive, config.tiktokUsername, "cloudflare_cron");
-    await kv.delete("last_error");
+  for (const account of config.tiktokAccounts) {
+    try {
+      const isCurrentlyLive = await fetchTikTokLiveStatus(account.username);
+      const result = await setTikTokAccountStatus(kv, account, isCurrentlyLive, "cloudflare_cron");
+      statuses.push(result.status);
 
-    if (isCurrentlyLive && !wasLive && config.channelId && env.DISCORD_TOKEN) {
-      await sendDiscordMessage(env, {
-        username: config.tiktokUsername,
-        channelId: config.channelId,
-        customMsg: config.customMessage,
-        mentionEveryone: config.mentionEveryone,
-      });
+      if (isCurrentlyLive && !result.previous && config.channelId && env.DISCORD_TOKEN) {
+        await sendDiscordMessage(env, {
+          username: account.username,
+          channelId: config.channelId,
+          customMsg: account.customMessage,
+          mentionEveryone: config.mentionEveryone,
+        });
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const previousStatus = await getTikTokAccountStatus(kv, account);
+      const result = await setTikTokAccountStatus(kv, account, previousStatus.isLive, "cloudflare_cron", message);
+      statuses.push(result.status);
+      console.error(`TikTok check failed for @${account.username}:`, message);
     }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    await kv.put("last_checked", new Date().toISOString());
-    await kv.put("last_error", message);
-    console.error("TikTok check failed:", message);
   }
+
+  await updateAggregateLiveStatus(kv, statuses, "cloudflare_cron");
 }
 
 export default {
@@ -811,6 +1038,10 @@ export default {
 
       if (url.pathname === "/admin/discord-status" && request.method === "GET") {
         return await handleDiscordStatus(request, env);
+      }
+
+      if (url.pathname === "/admin/tiktok/verify" && request.method === "POST") {
+        return await handleVerifyTikTokAccount(request, env);
       }
 
       if (url.pathname === "/admin/test-notify" && request.method === "POST") {

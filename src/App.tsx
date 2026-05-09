@@ -2,15 +2,18 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   Bell,
   Bot,
+  CheckCircle,
   ExternalLink,
   LayoutDashboard,
   Lock,
   LogOut,
+  Plus,
   Radio,
   RefreshCw,
   Send,
   Server,
   Settings,
+  Trash2,
   Users,
 } from 'lucide-react';
 
@@ -58,6 +61,14 @@ type DiscordSummary = {
   auditLogError?: string;
 };
 
+type TikTokWatchAccount = {
+  username: string;
+  liveUrl: string;
+  customMessage: string;
+  verifiedAt?: string | null;
+  isLive?: boolean;
+};
+
 type StatusPayload = {
   isLive: boolean;
   username?: string;
@@ -65,6 +76,7 @@ type StatusPayload = {
   lastChecked?: string | null;
   source?: string | null;
   homepageContent?: HomepageContent;
+  tiktokAccounts?: TikTokWatchAccount[];
 };
 
 type HomepageCard = {
@@ -87,7 +99,16 @@ type ConfigPayload = {
   tiktokLink: string;
   customMessage: string;
   mentionEveryone: boolean;
+  tiktokAccounts?: TikTokWatchAccount[];
   homepageContent?: HomepageContent;
+};
+
+const DEFAULT_CUSTOM_MESSAGE = 'is now LIVE on TikTok!';
+
+const DEFAULT_TIKTOK_ACCOUNT: TikTokWatchAccount = {
+  username: 'clawzpokeshipz',
+  liveUrl: 'https://www.tiktok.com/@clawzpokeshipz/live',
+  customMessage: DEFAULT_CUSTOM_MESSAGE,
 };
 
 const DEFAULT_HOMEPAGE_CONTENT: HomepageContent = {
@@ -110,6 +131,54 @@ const DEFAULT_HOMEPAGE_CONTENT: HomepageContent = {
     },
   ],
 };
+
+function normalizeTikTokUsername(value: string) {
+  return value
+    .trim()
+    .replace(/^@+/, '')
+    .replace(/^https?:\/\/(www\.)?tiktok\.com\/@/i, '')
+    .replace(/\/live\/?$/i, '')
+    .replace(/\/.*$/, '');
+}
+
+function liveUrlFor(username: string) {
+  return `https://www.tiktok.com/@${username}/live`;
+}
+
+function normalizeTikTokAccounts(
+  accounts?: TikTokWatchAccount[] | null,
+  fallbackUsername = DEFAULT_TIKTOK_ACCOUNT.username,
+  fallbackMessage = DEFAULT_CUSTOM_MESSAGE,
+) {
+  const seen = new Set<string>();
+  const nextAccounts = (accounts || [])
+    .map((account) => {
+      const username = normalizeTikTokUsername(account.username || '');
+      return {
+        username,
+        liveUrl: liveUrlFor(username),
+        customMessage: account.customMessage || fallbackMessage || DEFAULT_CUSTOM_MESSAGE,
+        verifiedAt: account.verifiedAt || null,
+      };
+    })
+    .filter((account) => {
+      if (!account.username || seen.has(account.username.toLowerCase())) return false;
+      seen.add(account.username.toLowerCase());
+      return true;
+    });
+
+  if (nextAccounts.length > 0) return nextAccounts;
+
+  const username = normalizeTikTokUsername(fallbackUsername) || DEFAULT_TIKTOK_ACCOUNT.username;
+  return [
+    {
+      username,
+      liveUrl: liveUrlFor(username),
+      customMessage: fallbackMessage || DEFAULT_CUSTOM_MESSAGE,
+      verifiedAt: null,
+    },
+  ];
+}
 
 function normalizeHomepageContent(content?: Partial<HomepageContent> | null): HomepageContent {
   return {
@@ -177,18 +246,27 @@ function App() {
   const [discordSummaryError, setDiscordSummaryError] = useState('');
   const [tiktokUsername, setTiktokUsername] = useState('clawzpokeshipz');
   const [tiktokLink, setTiktokLink] = useState('https://www.tiktok.com/@clawzpokeshipz/live');
-  const [customMessage, setCustomMessage] = useState('is now LIVE on TikTok!');
+  const [customMessage, setCustomMessage] = useState(DEFAULT_CUSTOM_MESSAGE);
+  const [tiktokAccounts, setTikTokAccounts] = useState<TikTokWatchAccount[]>([DEFAULT_TIKTOK_ACCOUNT]);
+  const [newTikTokUsername, setNewTikTokUsername] = useState('');
+  const [newTikTokMessage, setNewTikTokMessage] = useState(DEFAULT_CUSTOM_MESSAGE);
+  const [tiktokVerifyMessage, setTikTokVerifyMessage] = useState('');
   const [mentionEveryone, setMentionEveryone] = useState(false);
   const [homepageContent, setHomepageContent] = useState<HomepageContent>(DEFAULT_HOMEPAGE_CONTENT);
   const [isBusy, setIsBusy] = useState(false);
 
   const applyConfig = useCallback((config: ConfigPayload) => {
+    const accounts = normalizeTikTokAccounts(config.tiktokAccounts, config.tiktokUsername, config.customMessage);
+    const primaryAccount = accounts[0];
+
     setGuildId(config.guildId || '');
     setGuildName('');
     setSelectedChannel(config.channelId || '');
-    setTiktokUsername(config.tiktokUsername || 'clawzpokeshipz');
-    setTiktokLink(config.tiktokLink || `https://www.tiktok.com/@${config.tiktokUsername || 'clawzpokeshipz'}/live`);
-    setCustomMessage(config.customMessage || 'is now LIVE on TikTok!');
+    setTikTokAccounts(accounts);
+    setTiktokUsername(primaryAccount.username);
+    setTiktokLink(config.tiktokLink || primaryAccount.liveUrl);
+    setCustomMessage(primaryAccount.customMessage || DEFAULT_CUSTOM_MESSAGE);
+    setNewTikTokMessage(primaryAccount.customMessage || DEFAULT_CUSTOM_MESSAGE);
     setMentionEveryone(Boolean(config.mentionEveryone));
     setHomepageContent(normalizeHomepageContent(config.homepageContent));
   }, []);
@@ -232,6 +310,10 @@ function App() {
           if (data.username) setTiktokUsername(data.username);
           if (data.liveUrl) setTiktokLink(data.liveUrl);
           if (data.homepageContent) setHomepageContent(normalizeHomepageContent(data.homepageContent));
+          if (data.tiktokAccounts?.length) {
+            const liveAccount = data.tiktokAccounts.find((account) => 'isLive' in account && Boolean(account.isLive));
+            setTiktokLink((liveAccount || data.tiktokAccounts[0]).liveUrl);
+          }
         }
       } catch (err) {
         console.error('Failed to fetch live status:', err);
@@ -354,8 +436,9 @@ function App() {
         body: JSON.stringify({
           guildId,
           channelId: selectedChannel,
-          tiktokUsername,
-          customMessage,
+          tiktokUsername: tiktokAccounts[0]?.username || tiktokUsername,
+          customMessage: tiktokAccounts[0]?.customMessage || customMessage,
+          tiktokAccounts,
           mentionEveryone,
           homepageContent,
         }),
@@ -391,10 +474,58 @@ function App() {
     setView('home');
   };
 
-  const handleTikTokUsernameChange = (value: string) => {
-    const normalized = value.replace(/^@+/, '').trim();
-    setTiktokUsername(normalized);
-    setTiktokLink(`https://www.tiktok.com/@${normalized || 'clawzpokeshipz'}/live`);
+  const addTikTokAccount = async () => {
+    const username = normalizeTikTokUsername(newTikTokUsername);
+    if (!username) {
+      alert('Enter a TikTok username first.');
+      return;
+    }
+
+    setIsBusy(true);
+    setTikTokVerifyMessage('');
+    try {
+      const data = (await apiRequest('/admin/tiktok/verify', {
+        method: 'POST',
+        body: JSON.stringify({ username, customMessage: newTikTokMessage }),
+      })) as { account: TikTokWatchAccount };
+
+      const account = {
+        ...data.account,
+        customMessage: newTikTokMessage || DEFAULT_CUSTOM_MESSAGE,
+      };
+
+      setTikTokAccounts((current) => {
+        const exists = current.some((item) => item.username.toLowerCase() === account.username.toLowerCase());
+        if (exists) {
+          return current.map((item) => (item.username.toLowerCase() === account.username.toLowerCase() ? account : item));
+        }
+
+        return [...current, account];
+      });
+      setTiktokUsername(account.username);
+      setTiktokLink(account.liveUrl);
+      setTikTokVerifyMessage(`Found @${account.username} and added it to the watch list.`);
+      setNewTikTokUsername('');
+    } catch (err) {
+      setTikTokVerifyMessage(`Could not add account: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const removeTikTokAccount = (username: string) => {
+    if (tiktokAccounts.length <= 1) {
+      alert('Keep at least one TikTok account in the watch list.');
+      return;
+    }
+
+    setTikTokAccounts((current) => current.filter((account) => account.username !== username));
+  };
+
+  const updateTikTokAccountMessage = (username: string, value: string) => {
+    setTikTokAccounts((current) =>
+      current.map((account) => (account.username === username ? { ...account, customMessage: value } : account)),
+    );
   };
 
   const updateHomepageField = (field: keyof Omit<HomepageContent, 'cards'>, value: string) => {
@@ -651,30 +782,73 @@ function App() {
                       )}
                     </div>
 
-                    <div className="field">
-                      <label>TikTok Username</label>
-                      <input
-                        type="text"
-                        value={tiktokUsername}
-                        onChange={(event) => handleTikTokUsernameChange(event.target.value)}
-                        placeholder="clawzpokeshipz"
-                      />
-                    </div>
+                    <div className="admin-subsection tiktok-watch-editor">
+                      <h3>
+                        <Radio size={18} /> TIKTOK WATCH LIST
+                      </h3>
+                      <div className="watch-add-grid">
+                        <div className="field">
+                          <label>TikTok Username</label>
+                          <input
+                            type="text"
+                            value={newTikTokUsername}
+                            onChange={(event) => setNewTikTokUsername(event.target.value)}
+                            onKeyDown={(event) => event.key === 'Enter' && addTikTokAccount()}
+                            placeholder="clawzpokeshipz or @clawzpokeshipz"
+                          />
+                        </div>
+                        <div className="field">
+                          <label>Notify Message For This Account</label>
+                          <textarea
+                            value={newTikTokMessage}
+                            onChange={(event) => setNewTikTokMessage(event.target.value)}
+                            placeholder="is now LIVE! Catch the pack openings!"
+                            rows={2}
+                            className="terminal-input"
+                          />
+                        </div>
+                      </div>
+                      <button className="btn btn-secondary btn-small" onClick={addTikTokAccount} disabled={isBusy} type="button">
+                        <Plus size={15} /> Verify & Add Account
+                      </button>
+                      {tiktokVerifyMessage && <p className="field-note">{tiktokVerifyMessage}</p>}
 
-                    <div className="field">
-                      <label>TikTok Live Link</label>
-                      <input type="text" value={tiktokLink} onChange={(event) => setTiktokLink(event.target.value)} />
-                    </div>
-
-                    <div className="field">
-                      <label>Notification Message</label>
-                      <textarea
-                        value={customMessage}
-                        onChange={(event) => setCustomMessage(event.target.value)}
-                        placeholder="is now LIVE! Catch the pack openings!"
-                        rows={2}
-                        className="terminal-input"
-                      />
+                      <div className="watch-account-list">
+                        {tiktokAccounts.map((account) => (
+                          <div className="watch-account-card" key={account.username}>
+                            <div className="watch-account-header">
+                              <div>
+                                <strong>@{account.username}</strong>
+                                <span>
+                                  <CheckCircle size={14} /> Added & Found
+                                </span>
+                              </div>
+                              <div className="watch-account-actions">
+                                <a href={account.liveUrl} target="_blank" rel="noreferrer" className="btn btn-secondary btn-small">
+                                  Open
+                                </a>
+                                <button
+                                  className="btn-icon danger"
+                                  onClick={() => removeTikTokAccount(account.username)}
+                                  title={`Remove @${account.username}`}
+                                  type="button"
+                                >
+                                  <Trash2 size={17} />
+                                </button>
+                              </div>
+                            </div>
+                            <div className="field">
+                              <label>Notification Message</label>
+                              <textarea
+                                value={account.customMessage}
+                                onChange={(event) => updateTikTokAccountMessage(account.username, event.target.value)}
+                                rows={2}
+                                className="terminal-input"
+                              />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
 
                     <div className="field checkbox-field">
