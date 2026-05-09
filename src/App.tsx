@@ -436,15 +436,15 @@ function App() {
     }
   };
 
-  const saveConfig = async (options: { showAlert?: boolean; manageBusy?: boolean } = {}) => {
-    const { showAlert = true, manageBusy = true } = options;
+  const saveConfig = async (options: { showAlert?: boolean; manageBusy?: boolean; channelId?: string } = {}) => {
+    const { showAlert = true, manageBusy = true, channelId } = options;
     if (manageBusy) setIsBusy(true);
     try {
       const data = (await apiRequest('/admin/config', {
         method: 'POST',
         body: JSON.stringify({
           guildId,
-          channelId: selectedChannel,
+          channelId: channelId ?? selectedChannel,
           tiktokUsername: tiktokAccounts[0]?.username || tiktokUsername,
           customMessage: tiktokAccounts[0]?.customMessage || customMessage,
           tiktokAccounts,
@@ -462,6 +462,15 @@ function App() {
     } finally {
       if (manageBusy) setIsBusy(false);
     }
+  };
+
+  const handleChannelChange = async (value: string) => {
+    setSelectedChannel(value);
+    if (!value) return;
+
+    const saved = await saveConfig({ showAlert: false, channelId: value });
+    if (!saved) return;
+    alert('Discord notification channel saved.');
   };
 
   const testNotify = async () => {
@@ -700,7 +709,7 @@ function App() {
 
                     <div className="field">
                       <label>Target Channel</label>
-                      <select value={selectedChannel} onChange={(event) => setSelectedChannel(event.target.value)}>
+                      <select value={selectedChannel} onChange={(event) => handleChannelChange(event.target.value)}>
                         <option value="">Select a channel...</option>
                         {channels.map((channel) => (
                           <option key={channel.id} value={channel.id}>
