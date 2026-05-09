@@ -1,24 +1,35 @@
-// --- DISCORD LOGIC ---
+// Shared Discord sending logic
 async function sendDiscordMessage(env, { username, channelId, customMsg, mentionEveryone, isTest = false }) {
-  if (!channelId || !env.DISCORD_TOKEN) throw new Error("Missing Discord configuration.");
+  const token = env.DISCORD_TOKEN;
+  if (!token) throw new Error("Discord Token is not configured in Cloudflare Variables.");
+  if (!channelId) throw new Error("No Discord Channel ID selected.");
+
   const content = `${mentionEveryone ? "@everyone " : ""}🚀 **${username}** ${customMsg}${isTest ? " (TEST NOTIFICATION)" : ""}`;
-  return await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
+
+  const response = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
     method: "POST",
-    headers: { "Authorization": `Bot ${env.DISCORD_TOKEN}`, "Content-Type": "application/json" },
+    headers: { "Authorization": `Bot ${token}`, "Content-Type": "application/json" },
     body: JSON.stringify({
       content,
       embeds: [{
         title: `Watch ${username}'s Stream`,
         url: `https://www.tiktok.com/@${username}/live`,
         color: 16711680,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        footer: { text: "ClawzPokeShipz Live Monitor" }
       }]
     })
   });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(`Discord API Error: ${JSON.stringify(error)}`);
+  }
+
+  return response;
 }
 
 export default {
-  // 1. API & Website Handler
   async fetch(request, env) {
     const url = new URL(request.url);
     const corsHeaders = {
@@ -51,6 +62,8 @@ export default {
 
     if (url.pathname === "/admin/channels") {
       const guildId = await env.STATUS_KV.get("guild_id") || env.GUILD_ID;
+      if (!guildId) return new Response(JSON.stringify({ error: "Please enter and save a Guild ID first." }), { status: 400, headers: corsHeaders });
+      
       const res = await fetch(`https://discord.com/api/v10/guilds/${guildId}/channels`, {
         headers: { "Authorization": `Bot ${env.DISCORD_TOKEN}` }
       });
@@ -72,19 +85,24 @@ export default {
       const channelId = await env.STATUS_KV.get("channel_id") || env.DISCORD_CHANNEL_ID;
       const customMsg = await env.STATUS_KV.get("custom_message") || "is now LIVE on TikTok!";
       const mentionEveryone = await env.STATUS_KV.get("mention_everyone") === "true";
-      await sendDiscordMessage(env, { username, channelId, customMsg, mentionEveryone, isTest: true });
-      return new Response("OK", { headers: corsHeaders });
+      
+      try {
+        await sendDiscordMessage(env, { username, channelId, customMsg, mentionEveryone, isTest: true });
+        return new Response("OK", { headers: corsHeaders });
+      } catch (err) {
+        return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: corsHeaders });
+      }
     }
 
-    // 2. Serve Static Assets (The Website)
-    // This will serve your React app from the build output
-    return env.ASSETS ? await env.ASSETS.fetch(request) : new Response("Website Assets not found. Ensure Cloudflare Assets is enabled.", { status: 404 });
+    // Serve static assets from the Workers Sites / Assets binding
+    return env.ASSETS ? await env.ASSETS.fetch(request) : new Response("Frontend not found", { status: 404 });
   },
 
-  // 3. TikTok Bot (Cron Trigger)
   async scheduled(event, env, ctx) {
     const username = await env.STATUS_KV.get("tiktok_username") || "clawzpokeshipz";
     const channelId = await env.STATUS_KV.get("channel_id") || env.DISCORD_CHANNEL_ID;
+    if (!channelId || !env.DISCORD_TOKEN) return; // Wait for Claw to configure
+
     const customMsg = await env.STATUS_KV.get("custom_message") || "is now LIVE on TikTok!";
     const mentionEveryone = await env.STATUS_KV.get("mention_everyone") === "true";
     
