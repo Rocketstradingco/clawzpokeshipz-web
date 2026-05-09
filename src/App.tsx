@@ -65,13 +65,12 @@ function App() {
         }
       } else {
         // Log the technical error details
-        const errorText = await response.text();
+        const errorData = await response.json().catch(() => ({}));
         console.error("Backend Error Details:", {
           status: response.status,
-          statusText: response.statusText,
-          body: errorText.substring(0, 200) // First 200 chars
+          body: errorData
         });
-        alert(`Backend Error (${response.status}): Check the console (F12) for details.`);
+        alert(`Backend Error (${response.status}): ${errorData.message || "Unknown Error"}`);
       }
     } catch (err) {
       console.error("Network Error:", err);
