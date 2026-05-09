@@ -51,24 +51,31 @@ function App() {
         body: JSON.stringify({ username, password })
       });
       
-      const data = await response.json();
+      const contentType = response.headers.get("content-type");
       
-      if (response.ok && data.success) {
-        setAdminName(data.user);
-        setIsFirstLogin(data.isFirstLogin);
-        setIsLoggedIn(true);
-        setView('dashboard');
-      } else {
-        // If the backend sent a specific error (e.g. KV missing), show it
-        if (data.error) {
-          alert(`Backend Error: ${data.error}`);
+      if (response.ok && contentType && contentType.includes("application/json")) {
+        const data = await response.json();
+        if (data.success) {
+          setAdminName(data.user);
+          setIsFirstLogin(data.isFirstLogin);
+          setIsLoggedIn(true);
+          setView('dashboard');
         } else {
-          alert("Invalid Credentials");
+          alert(`Login Failed: ${data.error || "Invalid Credentials"}`);
         }
+      } else {
+        // Log the technical error details
+        const errorText = await response.text();
+        console.error("Backend Error Details:", {
+          status: response.status,
+          statusText: response.statusText,
+          body: errorText.substring(0, 200) // First 200 chars
+        });
+        alert(`Backend Error (${response.status}): Check the console (F12) for details.`);
       }
     } catch (err) {
-      console.error("Login fetch failed:", err);
-      alert("Could not reach the backend. Check if the Cloudflare Functions are deploying correctly.");
+      console.error("Network Error:", err);
+      alert("Network Error: Could not reach the server. Is the site still building?");
     }
   };
 
