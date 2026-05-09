@@ -265,7 +265,7 @@ function App() {
         <div className="banner-stage">
           <div className="claw-cable" aria-hidden="true"></div>
           <img src="/logo.png" alt="ClawzPokeShipz Logo" className="banner-image banner-base" />
-          <img src="/claw.png" alt="" className="banner-claw" aria-hidden="true" />
+          <img src="/claw-overlay.png" alt="" className="banner-claw" aria-hidden="true" />
         </div>
       </div>
 
