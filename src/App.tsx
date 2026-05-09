@@ -436,8 +436,9 @@ function App() {
     }
   };
 
-  const saveConfig = async () => {
-    setIsBusy(true);
+  const saveConfig = async (options: { showAlert?: boolean; manageBusy?: boolean } = {}) => {
+    const { showAlert = true, manageBusy = true } = options;
+    if (manageBusy) setIsBusy(true);
     try {
       const data = (await apiRequest('/admin/config', {
         method: 'POST',
@@ -453,17 +454,22 @@ function App() {
       })) as { config: ConfigPayload };
 
       applyConfig(data.config);
-      alert('Configuration saved.');
+      if (showAlert) alert('Configuration saved.');
+      return true;
     } catch (err) {
       alert(`Failed to save configuration: ${err instanceof Error ? err.message : String(err)}`);
+      return false;
     } finally {
-      setIsBusy(false);
+      if (manageBusy) setIsBusy(false);
     }
   };
 
   const testNotify = async () => {
     setIsBusy(true);
     try {
+      const saved = await saveConfig({ showAlert: false, manageBusy: false });
+      if (!saved) return;
+
       await apiRequest('/admin/test-notify', { method: 'POST' });
       alert('Test notification sent to Discord.');
     } catch (err) {
@@ -703,6 +709,10 @@ function App() {
                         ))}
                       </select>
                       {channels.length === 0 && <small className="field-note">No cached channels yet. Refresh once to load them.</small>}
+                      {selectedChannel && <small className="field-note">Selected channel will receive TikTok notifications.</small>}
+                      <button className="btn btn-primary btn-small" onClick={() => saveConfig()} disabled={isBusy} type="button">
+                        SAVE SETTINGS
+                      </button>
                     </div>
 
                     <div className="admin-subsection discord-insights">
@@ -938,7 +948,7 @@ function App() {
                     </div>
 
                     <div className="dashboard-actions">
-                      <button className="btn btn-primary" onClick={saveConfig} disabled={isBusy} type="button">
+                      <button className="btn btn-primary" onClick={() => saveConfig()} disabled={isBusy} type="button">
                         SAVE CONFIGURATION
                       </button>
                       <button className="btn btn-secondary" onClick={testNotify} disabled={isBusy} type="button">
