@@ -16,6 +16,7 @@ function App() {
   const [guildId, setGuildId] = useState('');
   const [channels, setChannels] = useState<Channel[]>([]);
   const [selectedChannel, setSelectedChannel] = useState('');
+  const [tiktokUsername, setTiktokUsername] = useState('clawzpokeshipz');
   const [tiktokLink, setTiktokLink] = useState('https://www.tiktok.com/@clawzpokeshipz/live');
 
   const [customMessage, setCustomMessage] = useState('is now LIVE on TikTok!');
@@ -102,7 +103,7 @@ function App() {
         body: JSON.stringify({ 
           guildId, 
           channelId: selectedChannel,
-          tiktokUsername: 'clawzpokeshipz',
+          tiktokUsername,
           customMessage,
           mentionEveryone
         })
@@ -245,6 +246,16 @@ function App() {
                           <option key={ch.id} value={ch.id}>#{ch.name}</option>
                         ))}
                       </select>
+                    </div>
+
+                    <div className="field">
+                      <label>TikTok Username:</label>
+                      <input 
+                        type="text" 
+                        value={tiktokUsername} 
+                        onChange={(e) => setTiktokUsername(e.target.value)}
+                        placeholder="e.g. clawzpokeshipz (without @)"
+                      />
                     </div>
 
                     <div className="field">
