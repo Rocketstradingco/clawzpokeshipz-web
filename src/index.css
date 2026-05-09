@@ -1,0 +1,328 @@
+:root {
+  --poke-yellow: #FFCB05;
+  --poke-gold: #C7A008;
+  --black: #000000;
+  --white: #FFFFFF;
+  --dark-bg: #0a0a0a;
+  --card-bg: #1e1e1e;
+  --text-main: #ffffff;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background-color: var(--dark-bg);
+  color: var(--text-main);
+  line-height: 1.6;
+}
+
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 20px;
+}
+
+.banner-container {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  padding: 40px 0 20px;
+  background: radial-gradient(circle, rgba(255,203,5,0.05) 0%, rgba(10,10,10,1) 70%);
+}
+
+.banner-image {
+  max-width: 100%;
+  max-height: 400px;
+  object-fit: contain;
+  filter: drop-shadow(0 0 20px rgba(255, 203, 5, 0.2));
+  border-radius: 20px;
+}
+
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 30px 0;
+  border-bottom: 3px solid var(--poke-yellow);
+}
+
+.logo-area {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+
+.pokeball-icon {
+  width: 40px;
+  height: 40px;
+  background: linear-gradient(to bottom, var(--poke-yellow) 50%, var(--white) 50%);
+  border-radius: 50%;
+  border: 3px solid var(--black);
+  position: relative;
+  box-shadow: 0 0 10px rgba(255, 203, 5, 0.4);
+}
+
+.pokeball-icon::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 12px;
+  height: 12px;
+  background: var(--white);
+  border: 2px solid var(--black);
+  border-radius: 50%;
+}
+
+.live-badge {
+  background: var(--poke-yellow);
+  color: var(--black);
+  padding: 5px 15px;
+  border-radius: 20px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 800;
+  font-size: 0.8rem;
+  box-shadow: 0 0 15px rgba(255, 203, 5, 0.6);
+}
+
+.blink {
+  animation: blink 1.5s infinite;
+}
+
+@keyframes blink {
+  0% { opacity: 1; }
+  50% { opacity: 0.4; }
+  100% { opacity: 1; }
+}
+
+.hero {
+  text-align: center;
+  padding: 100px 0;
+}
+
+.hero h2 {
+  font-size: 3.5rem;
+  margin-bottom: 20px;
+  background: linear-gradient(180deg, var(--poke-yellow) 0%, var(--poke-gold) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: -1px;
+}
+
+.hero p {
+  font-size: 1.25rem;
+  color: #cccccc;
+  max-width: 600px;
+  margin: 0 auto 40px;
+}
+
+.cta-buttons {
+  display: flex;
+  justify-content: center;
+  gap: 20px;
+}
+
+.btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 35px;
+  border-radius: 12px;
+  text-decoration: none;
+  font-weight: 800;
+  text-transform: uppercase;
+  transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.btn:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 10px 20px rgba(0,0,0,0.3);
+}
+
+.btn-primary {
+  background: var(--poke-yellow);
+  color: var(--black);
+  border: 2px solid var(--black);
+}
+
+.btn-primary:hover {
+  background: var(--white);
+}
+
+.btn-secondary {
+  background: transparent;
+  color: var(--white);
+  border: 2px solid var(--poke-yellow);
+}
+
+.btn-secondary:hover {
+  background: rgba(255, 203, 5, 0.1);
+}
+
+.features {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 30px;
+  padding: 50px 0;
+}
+
+.card {
+  background: var(--card-bg);
+  padding: 40px;
+  border-radius: 20px;
+  border: 1px solid #333;
+  transition: border-color 0.3s;
+}
+
+.card:hover {
+  border-color: var(--poke-yellow);
+}
+
+.card h3 {
+  margin-bottom: 15px;
+  color: var(--poke-yellow);
+  font-size: 1.5rem;
+}
+
+.nav-actions {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.btn-icon {
+  background: none;
+  border: none;
+  color: var(--white);
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 50%;
+  transition: background 0.2s, color 0.2s;
+}
+
+.btn-icon:hover {
+  background: rgba(255, 203, 5, 0.1);
+  color: var(--poke-yellow);
+}
+
+/* --- ADMIN BOX / TERMINAL --- */
+.admin-box {
+  background: #000;
+  border: 4px solid var(--card-bg);
+  border-radius: 10px;
+  max-width: 800px;
+  margin: 50px auto;
+  overflow: hidden;
+  box-shadow: 0 0 30px rgba(255, 203, 5, 0.1);
+}
+
+.terminal-header {
+  background: var(--card-bg);
+  color: var(--poke-yellow);
+  padding: 10px 20px;
+  font-weight: 900;
+  font-size: 0.9rem;
+  letter-spacing: 2px;
+  border-bottom: 2px solid var(--poke-yellow);
+}
+
+.terminal-body {
+  padding: 40px;
+  font-family: 'Courier New', Courier, monospace;
+}
+
+.prompt {
+  color: var(--poke-yellow);
+  margin-bottom: 15px;
+  display: block;
+}
+
+.input-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.terminal-body input, 
+.terminal-body select {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid #333;
+  color: var(--white);
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 1.1rem;
+  padding: 5px;
+  width: 100%;
+  outline: none;
+  transition: border-color 0.3s;
+}
+
+.terminal-body input:focus {
+  border-color: var(--poke-yellow);
+}
+
+.mt-20 { margin-top: 20px; }
+.full-width { width: 100%; justify-content: center; }
+
+/* --- DASHBOARD LAYOUT --- */
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: 1fr 200px;
+  gap: 40px;
+}
+
+.admin-section h3 {
+  color: var(--poke-yellow);
+  margin-bottom: 25px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.field {
+  margin-bottom: 25px;
+}
+
+.field label {
+  display: block;
+  font-size: 0.8rem;
+  color: #666;
+  margin-bottom: 10px;
+}
+
+.btn-small {
+  padding: 8px 15px;
+  font-size: 0.7rem;
+  margin-top: 10px;
+}
+
+.reset-flow {
+  text-align: center;
+}
+
+.reset-flow h3 {
+  color: var(--primary-red);
+  margin-bottom: 20px;
+}
+
+.reset-flow input {
+  margin-bottom: 20px;
+  text-align: center;
+}
+
+footer {
+  text-align: center;
+  padding: 60px 0;
+  color: #666;
+  border-top: 1px solid #222;
+}
