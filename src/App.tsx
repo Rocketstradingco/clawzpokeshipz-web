@@ -50,17 +50,25 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password })
       });
+      
       const data = await response.json();
-      if (data.success) {
+      
+      if (response.ok && data.success) {
         setAdminName(data.user);
         setIsFirstLogin(data.isFirstLogin);
         setIsLoggedIn(true);
         setView('dashboard');
       } else {
-        alert("Invalid Credentials");
+        // If the backend sent a specific error (e.g. KV missing), show it
+        if (data.error) {
+          alert(`Backend Error: ${data.error}`);
+        } else {
+          alert("Invalid Credentials");
+        }
       }
     } catch (err) {
-      alert("Login failed. Check Worker connection.");
+      console.error("Login fetch failed:", err);
+      alert("Could not reach the backend. Check if the Cloudflare Functions are deploying correctly.");
     }
   };
 
