@@ -25,13 +25,11 @@ function App() {
   const [customMessage, setCustomMessage] = useState('is now LIVE on TikTok!');
   const [mentionEveryone, setMentionEveryone] = useState(false);
 
-  const workerUrl = import.meta.env.VITE_WORKER_URL || 'https://your-worker.your-subdomain.workers.dev';
-
   // Polling for live status
   useEffect(() => {
     const checkStatus = async () => {
       try {
-        const response = await fetch(`${workerUrl}/status`);
+        const response = await fetch(`/status`);
         const data = await response.json();
         setIsLive(data.isLive);
       } catch (err) {
@@ -42,12 +40,12 @@ function App() {
     checkStatus();
     const interval = setInterval(checkStatus, 60000);
     return () => clearInterval(interval);
-  }, [workerUrl]);
+  }, []);
 
   // Actual login logic
   const handleLogin = async () => {
     try {
-      const response = await fetch(`${workerUrl}/admin/login`, {
+      const response = await fetch(`/admin/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password })
@@ -72,7 +70,7 @@ function App() {
       return;
     }
     try {
-      await fetch(`${workerUrl}/admin/update-profile`, {
+      await fetch(`/admin/update-profile`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -92,7 +90,7 @@ function App() {
 
   const fetchChannels = async () => {
     try {
-      const response = await fetch(`${workerUrl}/admin/channels`);
+      const response = await fetch(`/admin/channels`);
       const data = await response.json();
       if (Array.isArray(data)) {
         setChannels(data.filter((c: any) => c.type === 0));
@@ -106,7 +104,7 @@ function App() {
 
   const saveConfig = async () => {
     try {
-      await fetch(`${workerUrl}/admin/config`, {
+      await fetch(`/admin/config`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -125,7 +123,7 @@ function App() {
 
   const testNotify = async () => {
     try {
-      const response = await fetch(`${workerUrl}/admin/test-notify`, { method: 'POST' });
+      const response = await fetch(`/admin/test-notify`, { method: 'POST' });
       if (response.ok) {
         alert("Test notification sent to Discord!");
       } else {
