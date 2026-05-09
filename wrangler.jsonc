@@ -1,14 +1,19 @@
 {
-  "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "clawzpokeshipz-web",
+  "name": "pokeshipz-bot",
+  "main": "bot-worker.ts",
   "compatibility_date": "2026-05-09",
-  "observability": {
-    "enabled": true
+  "vars": {
+    "TIKTOK_USERNAME": "clawzpokeshipz"
   },
-  "assets": {
-    "not_found_handling": "single-page-application"
-  },
-  "compatibility_flags": [
-    "nodejs_compat"
-  ]
+  "kv_namespaces": [
+    {
+      "binding": "STATUS_KV",
+      "id": "placeholder"
+    }
+  ],
+  "triggers": {
+    "crons": [
+      "* * * * *"
+    ]
+  }
 }
