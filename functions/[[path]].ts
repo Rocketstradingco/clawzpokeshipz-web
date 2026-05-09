@@ -22,13 +22,29 @@ export default {
     // 2. Admin Login
     if (url.pathname === "/admin/login" && request.method === "POST") {
       const { password } = await request.json();
-      const storedPass = await env.STATUS_KV.get("admin_pass") || "Claw69";
+      const clawPass = await env.STATUS_KV.get("admin_pass") || "Claw69";
+      const rocketsPass = "pass123";
       
-      if (password === storedPass) {
-        return new Response(JSON.stringify({ success: true, isFirstLogin: storedPass === "Claw69" }), {
+      if (password === clawPass) {
+        return new Response(JSON.stringify({ 
+          success: true, 
+          user: "Claw", 
+          isFirstLogin: clawPass === "Claw69" 
+        }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" }
         });
       }
+
+      if (password === rocketsPass) {
+        return new Response(JSON.stringify({ 
+          success: true, 
+          user: "Rockets", 
+          isFirstLogin: false 
+        }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" }
+        });
+      }
+
       return new Response(JSON.stringify({ success: false }), { status: 401, headers: corsHeaders });
     }
 
