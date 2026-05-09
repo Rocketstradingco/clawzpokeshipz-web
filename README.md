@@ -41,9 +41,12 @@ Optional defaults can be set as Cloudflare vars or saved from the dashboard:
 - `DISCORD_CHANNEL_ID`
 - `TIKTOK_USERNAME`
 - `ADMIN_USERNAME`
+- `PRIMARY_ADMIN_DISCORD_ID`
 - `SECONDARY_ADMIN_USERNAME`
+- `SECONDARY_ADMIN_DISCORD_ID`
 
 The fallback first login is `Claw` / `Claw69` only when no admin password exists in KV or Cloudflare secrets. Change it immediately from the dashboard.
+Any logged-in admin can use the dashboard actions. Profile updates apply to the currently logged-in admin credential.
 
 ## Deploy
 

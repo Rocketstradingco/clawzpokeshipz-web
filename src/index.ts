@@ -14,8 +14,25 @@ type Env = {
   WORKER_UPDATE_SECRET?: string;
   ADMIN_USERNAME?: string;
   ADMIN_PASSWORD?: string;
+  PRIMARY_ADMIN_DISCORD_ID?: string;
   SECONDARY_ADMIN_USERNAME?: string;
   SECONDARY_ADMIN_PASSWORD?: string;
+  SECONDARY_ADMIN_DISCORD_ID?: string;
+};
+
+type AdminRole = "primary" | "secondary";
+
+type AdminAccount = {
+  role: AdminRole;
+  username: string;
+  password: string;
+  discordId: string;
+};
+
+type AdminSession = {
+  role: AdminRole;
+  user: string;
+  discordId?: string;
 };
 
 type DiscordMessageOptions = {
@@ -129,8 +146,54 @@ async function putOrDelete(kv: StatusKv, key: string, value: unknown) {
   }
 }
 
+async function getAdminAccounts(env: Env) {
+  const kv = requireKv(env);
+  const primary: AdminAccount = {
+    role: "primary",
+    username: (await kv.get("admin_name")) || env.ADMIN_USERNAME || DEFAULT_ADMIN_NAME,
+    password: (await kv.get("admin_pass")) || env.ADMIN_PASSWORD || DEFAULT_ADMIN_PASSWORD,
+    discordId: (await kv.get("primary_admin_discord_id")) || env.PRIMARY_ADMIN_DISCORD_ID || "",
+  };
+  const secondary: AdminAccount = {
+    role: "secondary",
+    username: (await kv.get("secondary_admin_name")) || env.SECONDARY_ADMIN_USERNAME || "rockets",
+    password: (await kv.get("secondary_admin_pass")) || env.SECONDARY_ADMIN_PASSWORD || "",
+    discordId: (await kv.get("secondary_admin_discord_id")) || env.SECONDARY_ADMIN_DISCORD_ID || "",
+  };
+
+  return { primary, secondary };
+}
+
+function serializeSession(account: AdminAccount): string {
+  return JSON.stringify({
+    role: account.role,
+    user: account.username,
+    discordId: account.discordId || undefined,
+  } satisfies AdminSession);
+}
+
+function parseSession(raw: string, accounts: Awaited<ReturnType<typeof getAdminAccounts>>): AdminSession {
+  try {
+    const parsed = JSON.parse(raw) as Partial<AdminSession>;
+    if (parsed.user && (parsed.role === "primary" || parsed.role === "secondary")) {
+      return {
+        role: parsed.role,
+        user: parsed.user,
+        discordId: parsed.discordId,
+      };
+    }
+  } catch {
+    // Older sessions stored the username as plain text.
+  }
+
+  const role = raw.toLowerCase() === accounts.primary.username.toLowerCase() ? "primary" : "secondary";
+  const account = role === "primary" ? accounts.primary : accounts.secondary;
+  return { role, user: raw, discordId: account.discordId || undefined };
+}
+
 async function requireAdmin(request: Request, env: Env) {
   const kv = requireKv(env);
+  const accounts = await getAdminAccounts(env);
   const authHeader = request.headers.get("Authorization") || "";
   const token = authHeader.startsWith("Bearer ") ? authHeader.slice("Bearer ".length).trim() : "";
 
@@ -143,8 +206,9 @@ async function requireAdmin(request: Request, env: Env) {
     throw new HttpError("Admin session expired. Please log in again.", 401, "SESSION_EXPIRED");
   }
 
+  const session = parseSession(user, accounts);
   await kv.put(`admin_session:${token}`, user, { expirationTtl: SESSION_TTL_SECONDS });
-  return { token, user };
+  return { token, ...session };
 }
 
 async function sendDiscordMessage(env: Env, options: DiscordMessageOptions) {
@@ -247,31 +311,31 @@ async function handleLogin(request: Request, env: Env) {
   const body = await readJsonBody<{ username?: string; password?: string }>(request);
   const username = String(body.username || "").trim();
   const password = String(body.password || "");
-  const ownerName = (await kv.get("admin_name")) || env.ADMIN_USERNAME || DEFAULT_ADMIN_NAME;
-  const ownerPass = (await kv.get("admin_pass")) || env.ADMIN_PASSWORD || DEFAULT_ADMIN_PASSWORD;
-  const secondaryName = env.SECONDARY_ADMIN_USERNAME || "rockets";
-  const secondaryPass = env.SECONDARY_ADMIN_PASSWORD || (await kv.get("secondary_admin_pass")) || "";
+  const accounts = await getAdminAccounts(env);
 
-  let matchedUser = "";
+  let matchedAccount: AdminAccount | undefined;
   let isFirstLogin = false;
 
-  if (username.toLowerCase() === ownerName.toLowerCase() && password === ownerPass) {
-    matchedUser = ownerName;
-    isFirstLogin = ownerPass === DEFAULT_ADMIN_PASSWORD;
-  } else if (secondaryPass && username.toLowerCase() === secondaryName.toLowerCase() && password === secondaryPass) {
-    matchedUser = secondaryName;
+  for (const account of [accounts.primary, accounts.secondary]) {
+    if (account.password && username.toLowerCase() === account.username.toLowerCase() && password === account.password) {
+      matchedAccount = account;
+      isFirstLogin = account.role === "primary" && account.password === DEFAULT_ADMIN_PASSWORD;
+      break;
+    }
   }
 
-  if (!matchedUser) {
+  if (!matchedAccount) {
     return jsonResponse({ success: false, error: "Invalid username or password." }, 401);
   }
 
   const token = crypto.randomUUID();
-  await kv.put(`admin_session:${token}`, matchedUser, { expirationTtl: SESSION_TTL_SECONDS });
+  await kv.put(`admin_session:${token}`, serializeSession(matchedAccount), { expirationTtl: SESSION_TTL_SECONDS });
 
   return jsonResponse({
     success: true,
-    user: matchedUser,
+    user: matchedAccount.username,
+    role: matchedAccount.role,
+    discordId: matchedAccount.discordId || null,
     token,
     isFirstLogin,
     expiresIn: SESSION_TTL_SECONDS,
@@ -281,16 +345,11 @@ async function handleLogin(request: Request, env: Env) {
 async function handleUpdateProfile(request: Request, env: Env) {
   const session = await requireAdmin(request, env);
   const kv = requireKv(env);
-  const ownerName = (await kv.get("admin_name")) || env.ADMIN_USERNAME || DEFAULT_ADMIN_NAME;
-
-  if (session.user.toLowerCase() !== ownerName.toLowerCase()) {
-    throw new HttpError("Only the primary admin can update the profile.", 403, "FORBIDDEN");
-  }
-
+  const accounts = await getAdminAccounts(env);
+  const account = session.role === "primary" ? accounts.primary : accounts.secondary;
   const body = await readJsonBody<{ currentPassword?: string; newPassword?: string; newName?: string }>(request);
-  const storedPass = (await kv.get("admin_pass")) || env.ADMIN_PASSWORD || DEFAULT_ADMIN_PASSWORD;
 
-  if (String(body.currentPassword || "") !== storedPass) {
+  if (String(body.currentPassword || "") !== account.password) {
     throw new HttpError("Current password is incorrect.", 401, "UNAUTHORIZED");
   }
 
@@ -301,11 +360,22 @@ async function handleUpdateProfile(request: Request, env: Env) {
     throw new HttpError("Password must be at least 6 characters.", 400, "WEAK_PASSWORD");
   }
 
-  if (newPassword) await kv.put("admin_pass", newPassword);
-  if (newName) await kv.put("admin_name", newName);
-  if (newName) await kv.put(`admin_session:${session.token}`, newName, { expirationTtl: SESSION_TTL_SECONDS });
+  if (session.role === "primary") {
+    if (newPassword) await kv.put("admin_pass", newPassword);
+    if (newName) await kv.put("admin_name", newName);
+  } else {
+    if (newPassword) await kv.put("secondary_admin_pass", newPassword);
+    if (newName) await kv.put("secondary_admin_name", newName);
+  }
 
-  return jsonResponse({ success: true, user: newName || ownerName });
+  const updatedAccount: AdminAccount = {
+    ...account,
+    username: newName || account.username,
+    password: newPassword || account.password,
+  };
+  await kv.put(`admin_session:${session.token}`, serializeSession(updatedAccount), { expirationTtl: SESSION_TTL_SECONDS });
+
+  return jsonResponse({ success: true, user: updatedAccount.username, role: updatedAccount.role });
 }
 
 async function handleChannels(request: Request, env: Env) {

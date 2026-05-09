@@ -16,7 +16,8 @@
     }
   ],
   "vars": {
-    "TIKTOK_USERNAME": "clawzpokeshipz"
+    "TIKTOK_USERNAME": "clawzpokeshipz",
+    "PRIMARY_ADMIN_DISCORD_ID": "1289695143598751889"
   },
   "kv_namespaces": [
     {
