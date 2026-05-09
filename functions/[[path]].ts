@@ -32,108 +32,108 @@ async function sendDiscordMessage(env, { username, channelId, customMsg, mention
   return response;
 }
 
-export default {
-  async fetch(request, env) {
-    const url = new URL(request.url);
-    const corsHeaders = {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, Authorization",
-    };
+export const onRequest = async (context) => {
+  const { request, env } = context;
+  const url = new URL(request.url);
+  const corsHeaders = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  };
 
-    if (request.method === "OPTIONS") {
-      return new Response(null, { headers: corsHeaders });
-    }
+  if (request.method === "OPTIONS") {
+    return new Response(null, { headers: corsHeaders });
+  }
 
-    // 1. Website Status Check
-    if (url.pathname === "/status") {
-      const isLive = await env.STATUS_KV.get("isLive") === "true";
-      return new Response(JSON.stringify({ isLive }), {
+  // 1. Website Status Check
+  if (url.pathname === "/status") {
+    const isLive = await env.STATUS_KV.get("isLive") === "true";
+    return new Response(JSON.stringify({ isLive }), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" }
+    });
+  }
+
+  // 2. Admin Login
+  if (url.pathname === "/admin/login" && request.method === "POST") {
+    const { username, password } = await request.json();
+    const ownerName = await env.STATUS_KV.get("admin_name") || "Claw";
+    const ownerPass = await env.STATUS_KV.get("admin_pass") || "Claw69";
+    const rocketsPass = "pass123";
+    
+    if (username.toLowerCase() === ownerName.toLowerCase() && password === ownerPass) {
+      return new Response(JSON.stringify({ success: true, user: ownerName, isFirstLogin: ownerPass === "Claw69" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" }
       });
     }
 
-    // 2. Admin Login
-    if (url.pathname === "/admin/login" && request.method === "POST") {
-      const { username, password } = await request.json();
-      const ownerName = await env.STATUS_KV.get("admin_name") || "Claw";
-      const ownerPass = await env.STATUS_KV.get("admin_pass") || "Claw69";
-      const rocketsPass = "pass123";
-      
-      if (username.toLowerCase() === ownerName.toLowerCase() && password === ownerPass) {
-        return new Response(JSON.stringify({ success: true, user: ownerName, isFirstLogin: ownerPass === "Claw69" }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" }
-        });
-      }
-
-      if (username.toLowerCase() === "rockets" && password === rocketsPass) {
-        return new Response(JSON.stringify({ success: true, user: "Rockets", isFirstLogin: false }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" }
-        });
-      }
-
-      return new Response(JSON.stringify({ success: false }), { status: 401, headers: corsHeaders });
+    if (username.toLowerCase() === "rockets" && password === rocketsPass) {
+      return new Response(JSON.stringify({ success: true, user: "Rockets", isFirstLogin: false }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" }
+      });
     }
 
-    // 3. Update Password & Name
-    if (url.pathname === "/admin/update-profile" && request.method === "POST") {
-      const { currentPassword, newPassword, newName } = await request.json();
-      const storedPass = await env.STATUS_KV.get("admin_pass") || "Claw69";
-
-      if (currentPassword !== storedPass) {
-        return new Response("Unauthorized", { status: 401, headers: corsHeaders });
-      }
-
-      if (newPassword) await env.STATUS_KV.put("admin_pass", newPassword);
-      if (newName) await env.STATUS_KV.put("admin_name", newName);
-      
-      return new Response("OK", { headers: corsHeaders });
-    }
-
-    // 4. Fetch Discord Channels
-    if (url.pathname === "/admin/channels") {
-      const guildId = await env.STATUS_KV.get("guild_id") || env.GUILD_ID;
-      if (!guildId) return new Response("Guild ID not configured", { status: 400, headers: corsHeaders });
-
-      try {
-        const response = await fetch(`https://discord.com/api/v10/guilds/${guildId}/channels`, {
-          headers: { "Authorization": `Bot ${env.DISCORD_TOKEN}` }
-        });
-        const channels = await response.json();
-        return new Response(JSON.stringify(channels), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" }
-        });
-      } catch (err) {
-        return new Response(err.message, { status: 500, headers: corsHeaders });
-      }
-    }
-
-    // 5. Save Configuration
-    if (url.pathname === "/admin/config" && request.method === "POST") {
-      const config = await request.json();
-      if (config.guildId) await env.STATUS_KV.put("guild_id", config.guildId);
-      if (config.channelId) await env.STATUS_KV.put("channel_id", config.channelId);
-      if (config.tiktokUsername) await env.STATUS_KV.put("tiktok_username", config.tiktokUsername);
-      if (config.customMessage) await env.STATUS_KV.put("custom_message", config.customMessage);
-      if (config.mentionEveryone !== undefined) await env.STATUS_KV.put("mention_everyone", config.mentionEveryone ? "true" : "false");
-      return new Response("OK", { headers: corsHeaders });
-    }
-
-    // 6. Test Notification
-    if (url.pathname === "/admin/test-notify" && request.method === "POST") {
-      const username = await env.STATUS_KV.get("tiktok_username") || "clawzpokeshipz";
-      const channelId = await env.STATUS_KV.get("channel_id") || env.DISCORD_CHANNEL_ID;
-      const customMsg = await env.STATUS_KV.get("custom_message") || "is now LIVE on TikTok!";
-      const mentionEveryone = await env.STATUS_KV.get("mention_everyone") === "true";
-      
-      try {
-        await sendDiscordMessage(env, { username, channelId, customMsg, mentionEveryone, isTest: true });
-        return new Response("Test notification sent!", { headers: corsHeaders });
-      } catch (err) {
-        return new Response(err.message, { status: 500, headers: corsHeaders });
-      }
-    }
-
-    return new Response("Not Found", { status: 404, headers: corsHeaders });
+    return new Response(JSON.stringify({ success: false }), { status: 401, headers: corsHeaders });
   }
+
+  // 3. Update Password & Name
+  if (url.pathname === "/admin/update-profile" && request.method === "POST") {
+    const { currentPassword, newPassword, newName } = await request.json();
+    const storedPass = await env.STATUS_KV.get("admin_pass") || "Claw69";
+
+    if (currentPassword !== storedPass) {
+      return new Response("Unauthorized", { status: 401, headers: corsHeaders });
+    }
+
+    if (newPassword) await env.STATUS_KV.put("admin_pass", newPassword);
+    if (newName) await env.STATUS_KV.put("admin_name", newName);
+    
+    return new Response("OK", { headers: corsHeaders });
+  }
+
+  // 4. Fetch Discord Channels
+  if (url.pathname === "/admin/channels") {
+    const guildId = await env.STATUS_KV.get("guild_id") || env.GUILD_ID;
+    if (!guildId) return new Response("Guild ID not configured", { status: 400, headers: corsHeaders });
+
+    try {
+      const response = await fetch(`https://discord.com/api/v10/guilds/${guildId}/channels`, {
+        headers: { "Authorization": `Bot ${env.DISCORD_TOKEN}` }
+      });
+      const channels = await response.json();
+      return new Response(JSON.stringify(channels), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" }
+      });
+    } catch (err) {
+      return new Response(err.message, { status: 500, headers: corsHeaders });
+    }
+  }
+
+  // 5. Save Configuration
+  if (url.pathname === "/admin/config" && request.method === "POST") {
+    const config = await request.json();
+    if (config.guildId) await env.STATUS_KV.put("guild_id", config.guildId);
+    if (config.channelId) await env.STATUS_KV.put("channel_id", config.channelId);
+    if (config.tiktokUsername) await env.STATUS_KV.put("tiktok_username", config.tiktokUsername);
+    if (config.customMessage) await env.STATUS_KV.put("custom_message", config.customMessage);
+    if (config.mentionEveryone !== undefined) await env.STATUS_KV.put("mention_everyone", config.mentionEveryone ? "true" : "false");
+    return new Response("OK", { headers: corsHeaders });
+  }
+
+  // 6. Test Notification
+  if (url.pathname === "/admin/test-notify" && request.method === "POST") {
+    const username = await env.STATUS_KV.get("tiktok_username") || "clawzpokeshipz";
+    const channelId = await env.STATUS_KV.get("channel_id") || env.DISCORD_CHANNEL_ID;
+    const customMsg = await env.STATUS_KV.get("custom_message") || "is now LIVE on TikTok!";
+    const mentionEveryone = await env.STATUS_KV.get("mention_everyone") === "true";
+    
+    try {
+      await sendDiscordMessage(env, { username, channelId, customMsg, mentionEveryone, isTest: true });
+      return new Response("Test notification sent!", { headers: corsHeaders });
+    } catch (err) {
+      return new Response(err.message, { status: 500, headers: corsHeaders });
+    }
+  }
+
+  // Fallback to static assets (the React app)
+  return env.ASSETS.fetch(request);
 };
