@@ -1,3 +1,37 @@
+// Shared Discord sending logic
+async function sendDiscordMessage(env, { username, channelId, customMsg, mentionEveryone, isTest = false }) {
+  if (!channelId || !env.DISCORD_TOKEN) {
+    throw new Error("Missing Discord configuration (Channel ID or Token).");
+  }
+
+  const content = `${mentionEveryone ? "@everyone " : ""}🚀 **${username}** ${customMsg}${isTest ? " (TEST NOTIFICATION)" : ""}`;
+
+  const response = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bot ${env.DISCORD_TOKEN}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      content,
+      embeds: [{
+        title: `Watch ${username}'s Stream`,
+        url: `https://www.tiktok.com/@${username}/live`,
+        color: 16711680,
+        timestamp: new Date().toISOString(),
+        footer: { text: "ClawzPokeShipz Live Monitor" }
+      }]
+    })
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(`Discord API Error: ${JSON.stringify(error)}`);
+  }
+
+  return response;
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -24,27 +58,16 @@ export default {
       const { username, password } = await request.json();
       const ownerName = await env.STATUS_KV.get("admin_name") || "Claw";
       const ownerPass = await env.STATUS_KV.get("admin_pass") || "Claw69";
-      
       const rocketsPass = "pass123";
       
-      // Check Owner
       if (username.toLowerCase() === ownerName.toLowerCase() && password === ownerPass) {
-        return new Response(JSON.stringify({ 
-          success: true, 
-          user: ownerName, 
-          isFirstLogin: ownerPass === "Claw69" 
-        }), {
+        return new Response(JSON.stringify({ success: true, user: ownerName, isFirstLogin: ownerPass === "Claw69" }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" }
         });
       }
 
-      // Check Rockets
       if (username.toLowerCase() === "rockets" && password === rocketsPass) {
-        return new Response(JSON.stringify({ 
-          success: true, 
-          user: "Rockets", 
-          isFirstLogin: false 
-        }), {
+        return new Response(JSON.stringify({ success: true, user: "Rockets", isFirstLogin: false }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" }
         });
       }
@@ -103,31 +126,8 @@ export default {
       const customMsg = await env.STATUS_KV.get("custom_message") || "is now LIVE on TikTok!";
       const mentionEveryone = await env.STATUS_KV.get("mention_everyone") === "true";
       
-      const content = `${mentionEveryone ? "@everyone " : ""}🚀 **${username}** ${customMsg}`;
-
       try {
-        const discordRes = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
-          method: "POST",
-          headers: {
-            "Authorization": `Bot ${env.DISCORD_TOKEN}`,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            content: content,
-            embeds: [{
-              title: `Watch ${username}'s Stream`,
-              url: `https://www.tiktok.com/@${username}/live`,
-              color: 16711680,
-              timestamp: new Date().toISOString()
-            }]
-          })
-        });
-        
-        if (!discordRes.ok) {
-          const errorData = await discordRes.json();
-          return new Response(JSON.stringify(errorData), { status: discordRes.status, headers: corsHeaders });
-        }
-
+        await sendDiscordMessage(env, { username, channelId, customMsg, mentionEveryone, isTest: true });
         return new Response("Test notification sent!", { headers: corsHeaders });
       } catch (err) {
         return new Response(err.message, { status: 500, headers: corsHeaders });
@@ -135,53 +135,5 @@ export default {
     }
 
     return new Response("Not Found", { status: 404, headers: corsHeaders });
-  },
-
-  // --- CRON TRIGGER HANDLER ---
-  async scheduled(event, env, ctx) {
-    const username = await env.STATUS_KV.get("tiktok_username") || "clawzpokeshipz";
-    const channelId = await env.STATUS_KV.get("channel_id") || env.DISCORD_CHANNEL_ID;
-    const customMsg = await env.STATUS_KV.get("custom_message") || "is now LIVE on TikTok!";
-    const mentionEveryone = await env.STATUS_KV.get("mention_everyone") === "true";
-    
-    console.log(`Checking TikTok status for: ${username}`);
-
-    try {
-      const response = await fetch(`https://www.tiktok.com/@${username}/live`, {
-        headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" }
-      });
-      const html = await response.text();
-      
-      const isCurrentlyLive = html.includes('"status":2') || html.includes('LIVE');
-      const wasLive = await env.STATUS_KV.get("isLive") === "true";
-
-      if (isCurrentlyLive && !wasLive) {
-        await env.STATUS_KV.put("isLive", "true");
-        
-        if (channelId && env.DISCORD_TOKEN) {
-          const content = `${mentionEveryone ? "@everyone " : ""}🚀 **${username}** ${customMsg}`;
-          await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
-            method: "POST",
-            headers: {
-              "Authorization": `Bot ${env.DISCORD_TOKEN}`,
-              "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-              content: content,
-              embeds: [{
-                title: `Watch ${username}'s Stream`,
-                url: `https://www.tiktok.com/@${username}/live`,
-                color: 16711680,
-                timestamp: new Date().toISOString()
-              }]
-            })
-          });
-        }
-      } else if (!isCurrentlyLive && wasLive) {
-        await env.STATUS_KV.put("isLive", "false");
-      }
-    } catch (err) {
-      console.error("Cron failed:", err.message);
-    }
   }
 };
