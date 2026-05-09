@@ -130,25 +130,25 @@ textarea {
     transform: translate3d(0, 0, 0);
   }
   52% {
-    transform: translate3d(0, 16%, 0);
+    transform: translate3d(0, 32%, 0);
   }
   58% {
-    transform: translate3d(0, 31%, 0);
+    transform: translate3d(0, 62%, 0);
   }
   64% {
-    transform: translate3d(0, 45%, 0);
+    transform: translate3d(0, 90%, 0);
   }
   68% {
-    transform: translate3d(0, 47%, 0);
+    transform: translate3d(0, 94%, 0);
   }
   70% {
-    transform: translate3d(0, 43%, 0);
+    transform: translate3d(0, 86%, 0);
   }
   76% {
-    transform: translate3d(0, 24%, 0);
+    transform: translate3d(0, 48%, 0);
   }
   82% {
-    transform: translate3d(0, 7%, 0);
+    transform: translate3d(0, 14%, 0);
   }
   88% {
     transform: translate3d(0, -4%, 0);
@@ -227,25 +227,25 @@ textarea {
     transform: translate3d(-50%, 0, 0) scaleY(1);
   }
   52% {
-    transform: translate3d(-50%, 16%, 0) scaleY(1.06);
+    transform: translate3d(-50%, 32%, 0) scaleY(1.12);
   }
   58% {
-    transform: translate3d(-50%, 31%, 0) scaleY(1.14);
+    transform: translate3d(-50%, 62%, 0) scaleY(1.28);
   }
   64% {
-    transform: translate3d(-50%, 45%, 0) scaleY(1.2);
+    transform: translate3d(-50%, 90%, 0) scaleY(1.4);
   }
   68% {
-    transform: translate3d(-50%, 47%, 0) scaleY(1.22);
+    transform: translate3d(-50%, 94%, 0) scaleY(1.44);
   }
   70% {
-    transform: translate3d(-50%, 43%, 0) scaleY(1.18);
+    transform: translate3d(-50%, 86%, 0) scaleY(1.36);
   }
   76% {
-    transform: translate3d(-50%, 24%, 0) scaleY(1.08);
+    transform: translate3d(-50%, 48%, 0) scaleY(1.16);
   }
   82% {
-    transform: translate3d(-50%, 7%, 0) scaleY(1.03);
+    transform: translate3d(-50%, 14%, 0) scaleY(1.06);
   }
   88% {
     transform: translate3d(-50%, -4%, 0) scaleY(0.98);
