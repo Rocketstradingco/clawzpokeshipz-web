@@ -1,14 +1,29 @@
 {
   "name": "clawzpokeshipz-web",
   "main": "src/index.ts",
+  "workers_dev": true,
+  "preview_urls": true,
   "compatibility_date": "2026-05-09",
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS"
   },
+  "routes": [
+    {
+      "pattern": "clawzpokeshipz.com",
+      "zone_name": "clawzpokeshipz.com",
+      "custom_domain": true
+    }
+  ],
   "vars": {
     "TIKTOK_USERNAME": "clawzpokeshipz"
   },
+  "kv_namespaces": [
+    {
+      "binding": "STATUS_KV",
+      "id": "373615bf921348df99eebb52e07a28f4"
+    }
+  ],
   "triggers": {
     "crons": [
       "*/5 * * * *"

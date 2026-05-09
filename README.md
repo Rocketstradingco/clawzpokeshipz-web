@@ -1,73 +1,72 @@
-# React + TypeScript + Vite
+# ClawzPokeShipz Web
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React/Vite frontend with a Cloudflare Worker backend for:
 
-Currently, two official plugins are available:
+- public TikTok live status at `/status`
+- Discord notification settings in the admin dashboard
+- Cloudflare Cron TikTok live checks every 5 minutes
+- external bot status updates at `/update`
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Local Development
 
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm install
+npm run build
+npm run preview
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+For local Worker secrets, copy `.env.example` to `.env` and fill in the values.
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+## Cloudflare Setup
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+The Worker needs the `STATUS_KV` binding declared in `wrangler.jsonc`.
+
+Required production secrets:
+
+```bash
+npx wrangler secret put DISCORD_TOKEN
+npx wrangler secret put WORKER_UPDATE_SECRET
 ```
+
+Recommended production secrets:
+
+```bash
+npx wrangler secret put ADMIN_PASSWORD
+npx wrangler secret put SECONDARY_ADMIN_PASSWORD
+```
+
+Optional defaults can be set as Cloudflare vars or saved from the dashboard:
+
+- `GUILD_ID`
+- `DISCORD_CHANNEL_ID`
+- `TIKTOK_USERNAME`
+- `ADMIN_USERNAME`
+- `SECONDARY_ADMIN_USERNAME`
+
+The fallback first login is `Claw` / `Claw69` only when no admin password exists in KV or Cloudflare secrets. Change it immediately from the dashboard.
+
+## Deploy
+
+```bash
+npm run build
+npx wrangler deploy
+```
+
+The build uses the Cloudflare Vite plugin. It creates the Worker bundle under `dist/clawzpokeshipz_web` and static assets under `dist/client`; Wrangler automatically uses the redirected generated config.
+
+## External TikTok Bot Integration
+
+The separate Node bot can keep the website badge in sync by posting:
+
+```http
+POST https://your-worker-url/update
+Content-Type: application/json
+
+{
+  "secret": "same value as WORKER_UPDATE_SECRET",
+  "live": true,
+  "username": "clawzpokeshipz"
+}
+```
+
+The external bot sends its own Discord webhook notification. The Cloudflare Cron watcher also sends a Discord message when it detects a transition from offline to live and a channel is configured.
