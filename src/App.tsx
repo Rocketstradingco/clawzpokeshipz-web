@@ -18,6 +18,25 @@ function App() {
   const [selectedChannel, setSelectedChannel] = useState('');
   const [tiktokLink, setTiktokLink] = useState('https://www.tiktok.com/@clawzpokeshipz/live');
 
+  // Polling for live status
+  useEffect(() => {
+    const checkStatus = async () => {
+      try {
+        // Replace with your actual worker URL when deployed
+        const workerUrl = import.meta.env.VITE_WORKER_URL || 'https://your-worker.your-subdomain.workers.dev';
+        const response = await fetch(`${workerUrl}/status`);
+        const data = await response.json();
+        setIsLive(data.isLive);
+      } catch (err) {
+        console.error("Failed to fetch live status:", err);
+      }
+    };
+
+    checkStatus();
+    const interval = setInterval(checkStatus, 60000); // Check every minute
+    return () => clearInterval(interval);
+  }, []);
+
   // Simulate login for now - will connect to Worker later
   const handleLogin = () => {
     if (password === 'Claw69') {
@@ -88,7 +107,7 @@ function App() {
                 <ExternalLink size={20} />
                 Visit TikTok
               </a>
-              <a href="https://discord.gg/yourlink" target="_blank" className="btn btn-secondary">
+              <a href="https://discord.gg/9JVNTanBEP" target="_blank" className="btn btn-secondary">
                 <Send size={20} />
                 Join Discord
               </a>
@@ -200,6 +219,21 @@ function App() {
             </div>
             <div className="card">
               <h3>Updates</h3>
+              <p>Stay tuned for new PokeShipz content and special events.</p>
+            </div>
+          </section>
+        )}
+      </main>
+
+      <footer>
+        <p>&copy; {new Date().getFullYear()} ClawzPokeShipz. All rights reserved.</p>
+      </footer>
+    </div>
+  );
+}
+
+export default App;
+          <h3>Updates</h3>
               <p>Stay tuned for new PokeShipz content and special events.</p>
             </div>
           </section>
