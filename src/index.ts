@@ -55,7 +55,22 @@ type TikTokAccountStatus = TikTokWatchAccount & {
   lastChecked: string | null;
   lastLiveChange: string | null;
   lastError: string | null;
+  lastNotifiedAt: string | null;
+  notificationError: string | null;
   source: string | null;
+};
+
+type PublicStatusSnapshot = {
+  isLive: boolean;
+  username: string;
+  liveUrl: string;
+  lastChecked: string | null;
+  lastLiveChange: string | null;
+  lastError: string | null;
+  source: string | null;
+  tiktokAccounts: TikTokAccountStatus[];
+  liveAccounts: TikTokAccountStatus[];
+  homepageContent: HomepageContent;
 };
 
 type HomepageCard = {
@@ -169,6 +184,17 @@ const DISCORD_MEMBER_AUDIT_ACTIONS: Record<number, string> = {
   28: "Bot added",
 };
 const SESSION_TTL_SECONDS = 12 * 60 * 60;
+const STATUS_SNAPSHOT_KEY = "status_snapshot";
+const MAX_TIKTOK_ACCOUNTS = 8;
+const TIKTOK_FETCH_TIMEOUT_MS = 9000;
+const TIKTOK_SCAN_LIMIT = 900_000;
+const TIKTOK_REQUEST_HEADERS = {
+  "User-Agent":
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+  "Accept-Language": "en-US,en;q=0.9",
+  "Cache-Control": "no-cache",
+};
 
 const baseCorsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -260,7 +286,7 @@ function normalizeTikTokAccounts(value: unknown, fallbackUsername?: unknown, fal
       return true;
     });
 
-  if (accounts.length > 0) return accounts;
+  if (accounts.length > 0) return accounts.slice(0, MAX_TIKTOK_ACCOUNTS);
 
   const username = normalizeTikTokUsername(fallbackUsername);
   return [
@@ -481,44 +507,123 @@ async function sendDiscordMessage(env: Env, options: DiscordMessageOptions) {
   }
 }
 
-async function fetchTikTokLiveStatus(username: string) {
-  const response = await fetch(liveUrlFor(username), {
-    headers: {
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    },
+function hasPattern(value: string, patterns: RegExp[]) {
+  return patterns.some((pattern) => pattern.test(value));
+}
+
+function isMissingTikTokAccount(html: string) {
+  return hasPattern(html, [
+    /couldn(?:'|&#x27;)?t find this account/i,
+    /"statusCode"\s*:\s*10202/i,
+    /"user"\s*:\s*null/i,
+  ]);
+}
+
+function isTikTokChallengePage(html: string) {
+  return hasPattern(html, [
+    /captcha/i,
+    /verify to continue/i,
+    /unusual traffic/i,
+    /access denied/i,
+    /login-title/i,
+  ]);
+}
+
+function detectTikTokLiveSignal(html: string): "live" | "offline" | "unknown" {
+  const scan = html.slice(0, TIKTOK_SCAN_LIMIT);
+
+  if (
+    hasPattern(scan, [
+      /"isLiving"\s*:\s*true/i,
+      /"isLive"\s*:\s*true/i,
+      /"roomStatus"\s*:\s*2\b/i,
+      /"liveStatus"\s*:\s*(1|2)\b/i,
+      /"user_live_status"\s*:\s*2\b/i,
+      /"status"\s*:\s*2\b[^}]{0,500}"LiveRoom"/i,
+      /title="LIVE"/i,
+    ])
+  ) {
+    return "live";
+  }
+
+  if (
+    hasPattern(scan, [
+      /"isLiving"\s*:\s*false/i,
+      /"roomStatus"\s*:\s*4\b/i,
+      /"LiveRoom"[^}]{0,1200}"status"\s*:\s*4\b/i,
+    ])
+  ) {
+    return "offline";
+  }
+
+  return "unknown";
+}
+
+async function fetchTikTokHtml(url: string) {
+  const response = await fetch(url, {
+    headers: TIKTOK_REQUEST_HEADERS,
+    signal: AbortSignal.timeout(TIKTOK_FETCH_TIMEOUT_MS),
   });
+
+  if (response.status === 404) {
+    return { status: response.status, html: "" };
+  }
+
+  if (response.status === 403 || response.status === 429) {
+    throw new HttpError(`TikTok blocked the check with ${response.status}.`, 502, "TIKTOK_BLOCKED");
+  }
 
   if (response.status >= 500) {
     throw new HttpError(`TikTok returned ${response.status}.`, 502, "TIKTOK_UNAVAILABLE");
   }
 
-  if (response.status === 404) {
-    return false;
+  if (response.status >= 400) {
+    throw new HttpError(`TikTok returned ${response.status}.`, 502, "TIKTOK_CHECK_FAILED");
   }
 
-  const html = await response.text();
-  const offlineSignals = [
-    /"status"\s*:\s*4\b/i,
-    /"isLiving"\s*:\s*false/i,
-    /couldn(?:'|&#x27;)?t find this account/i,
-  ];
+  return { status: response.status, html: await response.text() };
+}
 
-  if (offlineSignals.some((pattern) => pattern.test(html))) {
-    return false;
+async function fetchTikTokLiveStatus(username: string, previousIsLive: boolean) {
+  const urls = [liveUrlFor(username), profileUrlFor(username)];
+  let foundUsablePage = false;
+  let lastFetchError: Error | null = null;
+
+  for (const url of urls) {
+    let status = 0;
+    let html = "";
+
+    try {
+      const result = await fetchTikTokHtml(url);
+      status = result.status;
+      html = result.html;
+    } catch (error) {
+      lastFetchError = error instanceof Error ? error : new Error(String(error));
+      continue;
+    }
+
+    if (status === 404 || isMissingTikTokAccount(html)) return false;
+
+    if (isTikTokChallengePage(html)) {
+      lastFetchError = new HttpError("TikTok returned a challenge page, so the previous status was preserved.", 502, "TIKTOK_CHALLENGE");
+      continue;
+    }
+
+    foundUsablePage = true;
+    const detection = detectTikTokLiveSignal(html);
+    if (detection === "live") return true;
+    if (detection === "offline") return false;
   }
 
-  const liveSignals = [
-    /"status"\s*:\s*2\b/i,
-    /"roomStatus"\s*:\s*2\b/i,
-    /"liveStatus"\s*:\s*(1|2)\b/i,
-    /"isLiving"\s*:\s*true/i,
-    /"user_live_status"\s*:\s*2\b/i,
-    /title="LIVE"/i,
-  ];
+  if (!foundUsablePage && lastFetchError) {
+    throw lastFetchError;
+  }
 
-  return liveSignals.some((pattern) => pattern.test(html));
+  if (previousIsLive || !foundUsablePage) {
+    throw new HttpError("TikTok did not return a decisive live/offline signal, so the previous status was preserved.", 502, "TIKTOK_AMBIGUOUS");
+  }
+
+  return false;
 }
 
 async function verifyTikTokAccount(usernameInput: unknown): Promise<TikTokWatchAccount> {
@@ -528,11 +633,8 @@ async function verifyTikTokAccount(usernameInput: unknown): Promise<TikTokWatchA
   }
 
   const response = await fetch(profileUrlFor(username), {
-    headers: {
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    },
+    headers: TIKTOK_REQUEST_HEADERS,
+    signal: AbortSignal.timeout(TIKTOK_FETCH_TIMEOUT_MS),
   });
 
   if (response.status === 404) {
@@ -557,13 +659,7 @@ async function verifyTikTokAccount(usernameInput: unknown): Promise<TikTokWatchA
   }
 
   const html = await response.text();
-  const notFoundSignals = [
-    /couldn(?:'|&#x27;)?t find this account/i,
-    /"statusCode"\s*:\s*10202/i,
-    /"user"\s*:\s*null/i,
-  ];
-
-  if (notFoundSignals.some((pattern) => pattern.test(html))) {
+  if (isMissingTikTokAccount(html)) {
     throw new HttpError(`TikTok account @${username} was not found.`, 404, "TIKTOK_ACCOUNT_NOT_FOUND");
   }
 
@@ -578,84 +674,103 @@ async function verifyTikTokAccount(usernameInput: unknown): Promise<TikTokWatchA
   };
 }
 
-function statusKeyFor(username: string) {
-  return `tiktok_status:${username.toLowerCase()}`;
+function stringOrNull(value: unknown) {
+  return typeof value === "string" && value.trim() ? value : null;
 }
 
-async function getTikTokAccountStatus(kv: StatusKv, account: TikTokWatchAccount): Promise<TikTokAccountStatus> {
-  const raw = await kv.get(statusKeyFor(account.username));
-
-  if (raw) {
-    try {
-      const parsed = JSON.parse(raw) as Partial<TikTokAccountStatus>;
-      return {
-        ...account,
-        isLive: Boolean(parsed.isLive),
-        lastChecked: parsed.lastChecked || null,
-        lastLiveChange: parsed.lastLiveChange || null,
-        lastError: parsed.lastError || null,
-        source: parsed.source || null,
-      };
-    } catch {
-      // Fall through to the default status shape.
-    }
-  }
-
+function accountStatusFromRaw(account: TikTokWatchAccount, raw?: Partial<TikTokAccountStatus>): TikTokAccountStatus {
   return {
     ...account,
-    isLive: false,
-    lastChecked: null,
-    lastLiveChange: null,
-    lastError: null,
-    source: null,
+    isLive: Boolean(raw?.isLive),
+    lastChecked: stringOrNull(raw?.lastChecked),
+    lastLiveChange: stringOrNull(raw?.lastLiveChange),
+    lastError: stringOrNull(raw?.lastError),
+    lastNotifiedAt: stringOrNull(raw?.lastNotifiedAt),
+    notificationError: stringOrNull(raw?.notificationError),
+    source: stringOrNull(raw?.source),
   };
 }
 
-async function getTikTokAccountStatuses(kv: StatusKv, accounts: TikTokWatchAccount[]) {
-  return Promise.all(accounts.map((account) => getTikTokAccountStatus(kv, account)));
+async function readStatusSnapshot(kv: StatusKv): Promise<PublicStatusSnapshot | null> {
+  const raw = await kv.get(STATUS_SNAPSHOT_KEY);
+  if (!raw) return null;
+
+  try {
+    const parsed = JSON.parse(raw) as Partial<PublicStatusSnapshot>;
+    const rawAccounts = Array.isArray(parsed.tiktokAccounts) ? parsed.tiktokAccounts : [];
+    const accounts = normalizeTikTokAccounts(rawAccounts, parsed.username, DEFAULT_CUSTOM_MESSAGE);
+    const statuses = accounts.map((account) => {
+      const stored = rawAccounts.find(
+        (item) =>
+          item &&
+          typeof item === "object" &&
+          parseTikTokUsername((item as Partial<TikTokAccountStatus>).username).toLowerCase() ===
+            account.username.toLowerCase(),
+      ) as Partial<TikTokAccountStatus> | undefined;
+      return accountStatusFromRaw(account, stored);
+    });
+    const liveAccounts = statuses.filter((status) => status.isLive);
+    const primaryAccount = liveAccounts[0] || statuses[0] || DEFAULT_TIKTOK_ACCOUNT;
+
+    return {
+      isLive: typeof parsed.isLive === "boolean" ? parsed.isLive : liveAccounts.length > 0,
+      username: primaryAccount.username,
+      liveUrl: primaryAccount.liveUrl,
+      lastChecked: stringOrNull(parsed.lastChecked),
+      lastLiveChange: stringOrNull(parsed.lastLiveChange),
+      lastError: stringOrNull(parsed.lastError),
+      source: stringOrNull(parsed.source),
+      tiktokAccounts: statuses,
+      liveAccounts,
+      homepageContent: normalizeHomepageContent(parsed.homepageContent),
+    };
+  } catch {
+    return null;
+  }
 }
 
-async function setTikTokAccountStatus(
-  kv: StatusKv,
-  account: TikTokWatchAccount,
-  isLive: boolean,
+function statusesFromSnapshot(config: StoredConfig, snapshot: PublicStatusSnapshot | null) {
+  const previousByUsername = new Map(
+    (snapshot?.tiktokAccounts || []).map((status) => [status.username.toLowerCase(), status] as const),
+  );
+
+  return config.tiktokAccounts.map((account) => accountStatusFromRaw(account, previousByUsername.get(account.username.toLowerCase())));
+}
+
+function buildStatusSnapshot(
+  config: StoredConfig,
+  statuses: TikTokAccountStatus[],
   source: string,
-  errorMessage = "",
-) {
-  const now = new Date().toISOString();
-  const previous = await getTikTokAccountStatus(kv, account);
-  const next: TikTokAccountStatus = {
-    ...account,
-    isLive,
-    lastChecked: now,
-    lastLiveChange: previous.isLive !== isLive ? now : previous.lastLiveChange,
-    lastError: errorMessage || null,
-    source,
-  };
+  previousSnapshot: PublicStatusSnapshot | null,
+  checkedAt: string | null,
+): PublicStatusSnapshot {
+  const liveAccounts = statuses.filter((status) => status.isLive);
+  const primaryAccount = liveAccounts[0] || statuses[0] || DEFAULT_TIKTOK_ACCOUNT;
+  const isLive = liveAccounts.length > 0;
+  const statusErrors = statuses
+    .flatMap((status) => [status.lastError, status.notificationError])
+    .filter((message): message is string => Boolean(message));
+  const lastLiveChange =
+    previousSnapshot && previousSnapshot.isLive !== isLive
+      ? checkedAt
+      : previousSnapshot?.lastLiveChange || statuses.find((status) => status.lastLiveChange)?.lastLiveChange || null;
 
-  await kv.put(statusKeyFor(account.username), JSON.stringify(next));
-  return { previous: previous.isLive, status: next };
+  return {
+    isLive,
+    username: primaryAccount.username,
+    liveUrl: primaryAccount.liveUrl,
+    lastChecked: checkedAt || previousSnapshot?.lastChecked || null,
+    lastLiveChange,
+    lastError: statusErrors.length > 0 ? statusErrors.map((message) => message.slice(0, 300)).join("; ").slice(0, 1000) : null,
+    source,
+    tiktokAccounts: statuses,
+    liveAccounts,
+    homepageContent: config.homepageContent,
+  };
 }
 
-async function updateAggregateLiveStatus(kv: StatusKv, statuses: TikTokAccountStatus[], source: string) {
-  const now = new Date().toISOString();
-  const previous = (await kv.get("isLive")) === "true";
-  const isLive = statuses.some((status) => status.isLive);
-  const errors = statuses.filter((status) => status.lastError).map((status) => `@${status.username}: ${status.lastError}`);
-
-  await kv.put("isLive", isLive ? "true" : "false");
-  await kv.put("last_checked", now);
-  await kv.put("last_status_source", source);
-
-  if (previous !== isLive) {
-    await kv.put("last_live_change", now);
-  }
-
-  if (errors.length > 0) {
-    await kv.put("last_error", errors.join("; ").slice(0, 1000));
-  } else {
-    await kv.delete("last_error");
-  }
+async function writeStatusSnapshot(kv: StatusKv, snapshot: PublicStatusSnapshot) {
+  await kv.put(STATUS_SNAPSHOT_KEY, JSON.stringify(snapshot));
 }
 
 async function handleLogin(request: Request, env: Env) {
@@ -973,7 +1088,12 @@ async function handleSaveConfig(request: Request, env: Env) {
   await kv.put("mention_everyone", body.mentionEveryone ? "true" : "false");
   await kv.put("homepage_content", JSON.stringify(normalizeHomepageContent(body.homepageContent)));
 
-  return jsonResponse({ success: true, config: await getStoredConfig(env) });
+  const savedConfig = await getStoredConfig(env);
+  const previousSnapshot = await readStatusSnapshot(kv);
+  const snapshot = buildStatusSnapshot(savedConfig, statusesFromSnapshot(savedConfig, previousSnapshot), "config", previousSnapshot, new Date().toISOString());
+  await writeStatusSnapshot(kv, snapshot);
+
+  return jsonResponse({ success: true, config: savedConfig });
 }
 
 async function handleTestNotify(request: Request, env: Env) {
@@ -995,23 +1115,11 @@ async function handleTestNotify(request: Request, env: Env) {
 
 async function handleStatus(env: Env) {
   const kv = requireKv(env);
-  const config = await getStoredConfig(env);
-  const accountStatuses = await getTikTokAccountStatuses(kv, config.tiktokAccounts);
-  const liveAccounts = accountStatuses.filter((account) => account.isLive);
-  const primaryAccount = liveAccounts[0] || accountStatuses[0] || DEFAULT_TIKTOK_ACCOUNT;
+  const snapshot = await readStatusSnapshot(kv);
+  if (snapshot) return jsonResponse(snapshot);
 
-  return jsonResponse({
-    isLive: accountStatuses.some((account) => account.isLive),
-    username: primaryAccount.username,
-    liveUrl: primaryAccount.liveUrl,
-    lastChecked: await kv.get("last_checked"),
-    lastLiveChange: await kv.get("last_live_change"),
-    lastError: await kv.get("last_error"),
-    source: await kv.get("last_status_source"),
-    tiktokAccounts: accountStatuses,
-    liveAccounts,
-    homepageContent: config.homepageContent,
-  });
+  const config = await getStoredConfig(env);
+  return jsonResponse(buildStatusSnapshot(config, statusesFromSnapshot(config, null), "startup", null, null));
 }
 
 async function handleExternalUpdate(request: Request, env: Env) {
@@ -1028,16 +1136,37 @@ async function handleExternalUpdate(request: Request, env: Env) {
   const username = normalizeTikTokUsername(body.username || env.TIKTOK_USERNAME || DEFAULT_TIKTOK_USERNAME);
   const kv = requireKv(env);
   const config = await getStoredConfig(env);
+  const configuredAccount = config.tiktokAccounts.find((item) => item.username.toLowerCase() === username.toLowerCase());
   const account =
-    config.tiktokAccounts.find((item) => item.username.toLowerCase() === username.toLowerCase()) || {
+    configuredAccount || {
       username,
       liveUrl: liveUrlFor(username),
       customMessage: DEFAULT_CUSTOM_MESSAGE,
       verifiedAt: null,
     };
-  await setTikTokAccountStatus(kv, account, body.live, "external_bot");
-  const statuses = await getTikTokAccountStatuses(kv, config.tiktokAccounts);
-  await updateAggregateLiveStatus(kv, statuses, "external_bot");
+  const effectiveConfig = configuredAccount
+    ? config
+    : {
+        ...config,
+        tiktokAccounts: [account, ...config.tiktokAccounts].slice(0, MAX_TIKTOK_ACCOUNTS),
+      };
+  const previousSnapshot = await readStatusSnapshot(kv);
+  const now = new Date().toISOString();
+  const statuses = statusesFromSnapshot(effectiveConfig, previousSnapshot).map((status) => {
+    if (status.username.toLowerCase() !== account.username.toLowerCase()) return status;
+
+    return {
+      ...status,
+      ...account,
+      isLive: body.live,
+      lastChecked: now,
+      lastLiveChange: status.isLive !== body.live ? now : status.lastLiveChange,
+      lastError: null,
+      notificationError: body.live ? status.notificationError : null,
+      source: "external_bot",
+    };
+  });
+  await writeStatusSnapshot(kv, buildStatusSnapshot(effectiveConfig, statuses, "external_bot", previousSnapshot, now));
 
   return jsonResponse({ success: true, isLive: body.live, username });
 }
@@ -1045,32 +1174,69 @@ async function handleExternalUpdate(request: Request, env: Env) {
 async function runTikTokCheck(env: Env) {
   const config = await getStoredConfig(env);
   const kv = requireKv(env);
+  const previousSnapshot = await readStatusSnapshot(kv);
+  const previousStatuses = statusesFromSnapshot(config, previousSnapshot);
+  const previousByUsername = new Map(previousStatuses.map((status) => [status.username.toLowerCase(), status] as const));
   const statuses: TikTokAccountStatus[] = [];
+  const checkedAt = new Date().toISOString();
 
   for (const account of config.tiktokAccounts) {
-    try {
-      const isCurrentlyLive = await fetchTikTokLiveStatus(account.username);
-      const result = await setTikTokAccountStatus(kv, account, isCurrentlyLive, "cloudflare_cron");
-      statuses.push(result.status);
+    const previousStatus = previousByUsername.get(account.username.toLowerCase()) || accountStatusFromRaw(account);
 
-      if (isCurrentlyLive && !result.previous && config.channelId && env.DISCORD_TOKEN) {
-        await sendDiscordMessage(env, {
-          username: account.username,
-          channelId: config.channelId,
-          customMsg: account.customMessage,
-          mentionEveryone: config.mentionEveryone,
-        });
+    try {
+      const isCurrentlyLive = await fetchTikTokLiveStatus(account.username, previousStatus.isLive);
+      const nextStatus: TikTokAccountStatus = {
+        ...previousStatus,
+        ...account,
+        isLive: isCurrentlyLive,
+        lastChecked: checkedAt,
+        lastLiveChange: previousStatus.isLive !== isCurrentlyLive ? checkedAt : previousStatus.lastLiveChange,
+        lastError: null,
+        notificationError: isCurrentlyLive ? previousStatus.notificationError : null,
+        source: "cloudflare_cron",
+      };
+      const shouldNotify =
+        isCurrentlyLive &&
+        (!previousStatus.isLive || Boolean(previousStatus.notificationError)) &&
+        (config.channelId || !previousStatus.isLive);
+
+      if (shouldNotify) {
+        if (!config.channelId) {
+          nextStatus.notificationError = "No Discord notification channel is configured.";
+        } else if (!env.DISCORD_TOKEN) {
+          nextStatus.notificationError = "DISCORD_TOKEN is missing in Cloudflare secrets.";
+        } else {
+          try {
+            await sendDiscordMessage(env, {
+              username: account.username,
+              channelId: config.channelId,
+              customMsg: account.customMessage,
+              mentionEveryone: config.mentionEveryone,
+            });
+            nextStatus.lastNotifiedAt = checkedAt;
+            nextStatus.notificationError = null;
+          } catch (error) {
+            nextStatus.notificationError = error instanceof Error ? error.message : String(error);
+            console.error(`Discord notification failed for @${account.username}:`, nextStatus.notificationError);
+          }
+        }
       }
+
+      statuses.push(nextStatus);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      const previousStatus = await getTikTokAccountStatus(kv, account);
-      const result = await setTikTokAccountStatus(kv, account, previousStatus.isLive, "cloudflare_cron", message);
-      statuses.push(result.status);
+      statuses.push({
+        ...previousStatus,
+        ...account,
+        lastChecked: checkedAt,
+        lastError: message,
+        source: "cloudflare_cron",
+      });
       console.error(`TikTok check failed for @${account.username}:`, message);
     }
   }
 
-  await updateAggregateLiveStatus(kv, statuses, "cloudflare_cron");
+  await writeStatusSnapshot(kv, buildStatusSnapshot(config, statuses, "cloudflare_cron", previousSnapshot, checkedAt));
 }
 
 function getChicagoDayHour(date = new Date()) {

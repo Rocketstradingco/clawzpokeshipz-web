@@ -108,6 +108,7 @@ type ConfigPayload = {
 };
 
 const DEFAULT_CUSTOM_MESSAGE = 'is now LIVE on TikTok!';
+const MAX_TIKTOK_ACCOUNTS = 8;
 
 const DEFAULT_TIKTOK_ACCOUNT: TikTokWatchAccount = {
   username: 'clawzpokeshipz',
@@ -504,6 +505,12 @@ function App() {
       return;
     }
 
+    const isExisting = tiktokAccounts.some((item) => item.username.toLowerCase() === username.toLowerCase());
+    if (!isExisting && tiktokAccounts.length >= MAX_TIKTOK_ACCOUNTS) {
+      setTikTokVerifyMessage(`The watch list is capped at ${MAX_TIKTOK_ACCOUNTS} accounts for the Cloudflare free tier.`);
+      return;
+    }
+
     setIsBusy(true);
     setTikTokVerifyMessage('');
     try {
@@ -815,6 +822,9 @@ function App() {
                       <h3>
                         <Radio size={18} /> TIKTOK WATCH LIST
                       </h3>
+                      <p className="field-note">
+                        Watching {tiktokAccounts.length} of {MAX_TIKTOK_ACCOUNTS} accounts.
+                      </p>
                       <div className="watch-add-grid">
                         <div className="field">
                           <label>TikTok Username</label>
