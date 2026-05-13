@@ -111,8 +111,8 @@ const DEFAULT_CUSTOM_MESSAGE = 'is now LIVE on TikTok!';
 const MAX_TIKTOK_ACCOUNTS = 8;
 
 const DEFAULT_TIKTOK_ACCOUNT: TikTokWatchAccount = {
-  username: 'clawzpokeshipz',
-  liveUrl: 'https://www.tiktok.com/@clawzpokeshipz/live',
+  username: 'clawllstarzpokeshipz',
+  liveUrl: 'https://www.tiktok.com/@clawllstarzpokeshipz/live',
   customMessage: DEFAULT_CUSTOM_MESSAGE,
 };
 
@@ -250,8 +250,8 @@ function App() {
   const [selectedChannel, setSelectedChannel] = useState('');
   const [discordSummary, setDiscordSummary] = useState<DiscordSummary | null>(null);
   const [discordSummaryError, setDiscordSummaryError] = useState('');
-  const [tiktokUsername, setTiktokUsername] = useState('clawzpokeshipz');
-  const [tiktokLink, setTiktokLink] = useState('https://www.tiktok.com/@clawzpokeshipz/live');
+  const [tiktokUsername, setTiktokUsername] = useState(DEFAULT_TIKTOK_ACCOUNT.username);
+  const [tiktokLink, setTiktokLink] = useState(DEFAULT_TIKTOK_ACCOUNT.liveUrl);
   const [customMessage, setCustomMessage] = useState(DEFAULT_CUSTOM_MESSAGE);
   const [tiktokAccounts, setTikTokAccounts] = useState<TikTokWatchAccount[]>([DEFAULT_TIKTOK_ACCOUNT]);
   const [newTikTokUsername, setNewTikTokUsername] = useState('');
@@ -833,7 +833,7 @@ function App() {
                             value={newTikTokUsername}
                             onChange={(event) => setNewTikTokUsername(event.target.value)}
                             onKeyDown={(event) => event.key === 'Enter' && addTikTokAccount()}
-                            placeholder="clawzpokeshipz or @clawzpokeshipz"
+                            placeholder="clawllstarzpokeshipz or @clawllstarzpokeshipz"
                           />
                         </div>
                         <div className="field">

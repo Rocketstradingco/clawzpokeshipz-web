@@ -142,7 +142,7 @@ type StoredConfig = {
   homepageContent: HomepageContent;
 };
 
-const DEFAULT_TIKTOK_USERNAME = "clawzpokeshipz";
+const DEFAULT_TIKTOK_USERNAME = "clawllstarzpokeshipz";
 const DEFAULT_ADMIN_NAME = "Claw";
 const DEFAULT_ADMIN_PASSWORD = "Claw69";
 const DEFAULT_CUSTOM_MESSAGE = "is now LIVE on TikTok!";
