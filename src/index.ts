@@ -511,7 +511,22 @@ function hasPattern(value: string, patterns: RegExp[]) {
   return patterns.some((pattern) => pattern.test(value));
 }
 
+function getTikTokCanonicalUsername(html: string) {
+  const match = html.match(/"uniqueId"\s*:\s*"([^"]+)"/i);
+  return match ? parseTikTokUsername(match[1]) : "";
+}
+
+function hasTikTokProfileSignals(html: string) {
+  return Boolean(getTikTokCanonicalUsername(html)) || hasPattern(html, [
+    /"secUid"\s*:\s*"[^"]+"/i,
+    /"nickname"\s*:/i,
+    /"followerCount"\s*:/i,
+  ]);
+}
+
 function isMissingTikTokAccount(html: string) {
+  if (hasTikTokProfileSignals(html)) return false;
+
   return hasPattern(html, [
     /couldn(?:'|&#x27;)?t find this account/i,
     /"statusCode"\s*:\s*10202/i,
@@ -659,12 +674,11 @@ async function verifyTikTokAccount(usernameInput: unknown): Promise<TikTokWatchA
   }
 
   const html = await response.text();
-  if (isMissingTikTokAccount(html)) {
+  const canonicalUsername = getTikTokCanonicalUsername(html) || username;
+
+  if (!hasTikTokProfileSignals(html) && isMissingTikTokAccount(html)) {
     throw new HttpError(`TikTok account @${username} was not found.`, 404, "TIKTOK_ACCOUNT_NOT_FOUND");
   }
-
-  const canonicalMatch = html.match(/"uniqueId"\s*:\s*"([^"]+)"/i);
-  const canonicalUsername = canonicalMatch ? parseTikTokUsername(canonicalMatch[1]) || username : username;
 
   return {
     username: canonicalUsername,
