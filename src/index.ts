@@ -524,6 +524,14 @@ function hasTikTokProfileSignals(html: string) {
   ]);
 }
 
+function hasTikTokLiveRoomSignals(html: string) {
+  return hasPattern(html, [
+    /"liveRoomUserInfo"[\s\S]{0,6000}"roomId"\s*:\s*"\d{8,}"/i,
+    /"liveRoomStats"\s*:\s*\{[^}]*"userCount"\s*:\s*[1-9]\d*/i,
+    /"stream_data"\s*:\s*"\{\\?"common\\?"\s*:\s*\{[^"]*\\?"room_id\\?"\s*:\s*\\?"\d{8,}/i,
+  ]);
+}
+
 function isMissingTikTokAccount(html: string) {
   if (hasTikTokProfileSignals(html)) return false;
 
@@ -535,6 +543,8 @@ function isMissingTikTokAccount(html: string) {
 }
 
 function isTikTokChallengePage(html: string) {
+  if (hasTikTokProfileSignals(html) || hasTikTokLiveRoomSignals(html)) return false;
+
   return hasPattern(html, [
     /captcha/i,
     /verify to continue/i,
@@ -555,6 +565,9 @@ function detectTikTokLiveSignal(html: string): "live" | "offline" | "unknown" {
       /"liveStatus"\s*:\s*(1|2)\b/i,
       /"user_live_status"\s*:\s*2\b/i,
       /"status"\s*:\s*2\b[^}]{0,500}"LiveRoom"/i,
+      /"liveRoomUserInfo"[\s\S]{0,6000}"roomId"\s*:\s*"\d{8,}"/i,
+      /"liveRoomStats"\s*:\s*\{[^}]*"userCount"\s*:\s*[1-9]\d*/i,
+      /"stream_data"\s*:\s*"\{\\?"common\\?"\s*:\s*\{[^"]*\\?"room_id\\?"\s*:\s*\\?"\d{8,}/i,
       /title="LIVE"/i,
     ])
   ) {
