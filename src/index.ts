@@ -55,6 +55,7 @@ type TikTokAccountStatus = TikTokWatchAccount & {
   lastChecked: string | null;
   lastLiveChange: string | null;
   lastError: string | null;
+  lastErrorAt: string | null;
   lastNotifiedAt: string | null;
   notificationError: string | null;
   source: string | null;
@@ -188,6 +189,7 @@ const STATUS_SNAPSHOT_KEY = "status_snapshot";
 const MAX_TIKTOK_ACCOUNTS = 8;
 const TIKTOK_FETCH_TIMEOUT_MS = 9000;
 const TIKTOK_SCAN_LIMIT = 900_000;
+const LIVE_STATUS_PRESERVE_MS = 20 * 60 * 1000;
 const TIKTOK_REQUEST_HEADERS = {
   "User-Agent":
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -511,6 +513,44 @@ function hasPattern(value: string, patterns: RegExp[]) {
   return patterns.some((pattern) => pattern.test(value));
 }
 
+function recordOrNull(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+}
+
+function numberOrNull(value: unknown) {
+  const number = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function parseSigiState(html: string): Record<string, unknown> | null {
+  const match = html.match(/<script[^>]+id=["']SIGI_STATE["'][^>]*>([\s\S]*?)<\/script>/i);
+  if (!match) return null;
+
+  try {
+    return recordOrNull(JSON.parse(match[1]));
+  } catch {
+    return null;
+  }
+}
+
+function detectTikTokSigiLiveSignal(html: string): "live" | "offline" | "unknown" {
+  const state = parseSigiState(html);
+  const liveRoom = recordOrNull(state?.LiveRoom);
+  const liveRoomUserInfo = recordOrNull(liveRoom?.liveRoomUserInfo);
+  const user = recordOrNull(liveRoomUserInfo?.user);
+  const nestedLiveRoom = recordOrNull(liveRoomUserInfo?.liveRoom);
+  const statusValues = [
+    numberOrNull(liveRoom?.liveRoomStatus),
+    numberOrNull(user?.status),
+    numberOrNull(nestedLiveRoom?.status),
+  ].filter((value): value is number => value !== null);
+
+  if (statusValues.some((status) => status === 2)) return "live";
+  if (statusValues.some((status) => status === 4 || status === 0)) return "offline";
+
+  return "unknown";
+}
+
 function getTikTokCanonicalUsername(html: string) {
   const match = html.match(/"uniqueId"\s*:\s*"([^"]+)"/i);
   return match ? parseTikTokUsername(match[1]) : "";
@@ -556,18 +596,17 @@ function isTikTokChallengePage(html: string) {
 
 function detectTikTokLiveSignal(html: string): "live" | "offline" | "unknown" {
   const scan = html.slice(0, TIKTOK_SCAN_LIMIT);
+  const sigiSignal = detectTikTokSigiLiveSignal(scan);
+  if (sigiSignal !== "unknown") return sigiSignal;
 
   if (
     hasPattern(scan, [
       /"isLiving"\s*:\s*true/i,
       /"isLive"\s*:\s*true/i,
       /"roomStatus"\s*:\s*2\b/i,
-      /"liveStatus"\s*:\s*(1|2)\b/i,
+      /"liveStatus"\s*:\s*2\b/i,
       /"user_live_status"\s*:\s*2\b/i,
       /"status"\s*:\s*2\b[^}]{0,500}"LiveRoom"/i,
-      /"liveRoomUserInfo"[\s\S]{0,6000}"roomId"\s*:\s*"\d{8,}"/i,
-      /"liveRoomStats"\s*:\s*\{[^}]*"userCount"\s*:\s*[1-9]\d*/i,
-      /"stream_data"\s*:\s*"\{\\?"common\\?"\s*:\s*\{[^"]*\\?"room_id\\?"\s*:\s*\\?"\d{8,}/i,
       /title="LIVE"/i,
     ])
   ) {
@@ -578,7 +617,9 @@ function detectTikTokLiveSignal(html: string): "live" | "offline" | "unknown" {
     hasPattern(scan, [
       /"isLiving"\s*:\s*false/i,
       /"roomStatus"\s*:\s*4\b/i,
-      /"LiveRoom"[^}]{0,1200}"status"\s*:\s*4\b/i,
+      /"liveRoomStatus"\s*:\s*0\b/i,
+      /"LiveRoom"[\s\S]{0,8000}"status"\s*:\s*4\b/i,
+      /"liveRoomUserInfo"[\s\S]{0,8000}"status"\s*:\s*4\b/i,
     ])
   ) {
     return "offline";
@@ -705,6 +746,27 @@ function stringOrNull(value: unknown) {
   return typeof value === "string" && value.trim() ? value : null;
 }
 
+function parseTimestamp(value: string | null) {
+  if (!value) return null;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function errorStartedAt(previousStatus: TikTokAccountStatus, checkedAt: string) {
+  if (!previousStatus.lastError) return checkedAt;
+  return previousStatus.lastErrorAt || previousStatus.lastChecked || checkedAt;
+}
+
+function shouldPreserveLiveAfterError(previousStatus: TikTokAccountStatus, errorSince: string, checkedAt: string) {
+  if (!previousStatus.isLive) return false;
+
+  const errorTimestamp = parseTimestamp(errorSince);
+  const checkedTimestamp = parseTimestamp(checkedAt);
+  if (errorTimestamp === null || checkedTimestamp === null) return true;
+
+  return checkedTimestamp - errorTimestamp < LIVE_STATUS_PRESERVE_MS;
+}
+
 function accountStatusFromRaw(account: TikTokWatchAccount, raw?: Partial<TikTokAccountStatus>): TikTokAccountStatus {
   return {
     ...account,
@@ -712,6 +774,7 @@ function accountStatusFromRaw(account: TikTokWatchAccount, raw?: Partial<TikTokA
     lastChecked: stringOrNull(raw?.lastChecked),
     lastLiveChange: stringOrNull(raw?.lastLiveChange),
     lastError: stringOrNull(raw?.lastError),
+    lastErrorAt: stringOrNull(raw?.lastErrorAt),
     lastNotifiedAt: stringOrNull(raw?.lastNotifiedAt),
     notificationError: stringOrNull(raw?.notificationError),
     source: stringOrNull(raw?.source),
@@ -1219,6 +1282,7 @@ async function runTikTokCheck(env: Env) {
         lastChecked: checkedAt,
         lastLiveChange: previousStatus.isLive !== isCurrentlyLive ? checkedAt : previousStatus.lastLiveChange,
         lastError: null,
+        lastErrorAt: null,
         notificationError: isCurrentlyLive ? previousStatus.notificationError : null,
         source: "cloudflare_cron",
       };
@@ -1252,11 +1316,17 @@ async function runTikTokCheck(env: Env) {
       statuses.push(nextStatus);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      const errorSince = errorStartedAt(previousStatus, checkedAt);
+      const preserveLive = shouldPreserveLiveAfterError(previousStatus, errorSince, checkedAt);
       statuses.push({
         ...previousStatus,
         ...account,
+        isLive: preserveLive,
         lastChecked: checkedAt,
+        lastLiveChange: previousStatus.isLive !== preserveLive ? checkedAt : previousStatus.lastLiveChange,
         lastError: message,
+        lastErrorAt: errorSince,
+        notificationError: preserveLive ? previousStatus.notificationError : null,
         source: "cloudflare_cron",
       });
       console.error(`TikTok check failed for @${account.username}:`, message);

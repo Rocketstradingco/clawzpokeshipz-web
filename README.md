@@ -29,7 +29,7 @@ This project is tuned to stay inside Cloudflare's free limits for a small live-s
 - public live status is stored in one `status_snapshot` KV key, so a normal cron check writes once instead of writing several per-account and aggregate keys
 - `/status` reads that same snapshot key when available, keeping public polling cheap
 - the TikTok watch list is capped at 8 accounts to keep each cron invocation well below the Workers Free subrequest limit
-- if TikTok returns a block, challenge, timeout, or ambiguous page while the account was previously live, the Worker preserves the previous status instead of flipping offline
+- if TikTok returns a block, challenge, timeout, or ambiguous page while the account was previously live, the Worker preserves the previous status only briefly so a stale live badge cannot stay on forever
 - Discord notification failures are saved in the snapshot and retried while the account remains live
 
 Cloudflare's free KV write limit is the practical constraint for this watcher. At the current 5-minute interval, the scheduled monitor should use about 288 status writes per day before occasional admin/session/config writes.
