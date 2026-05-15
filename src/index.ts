@@ -1279,10 +1279,20 @@ async function handleTestNotify(request: Request, env: Env) {
 async function handleStatus(env: Env) {
   const kv = requireKv(env);
   const snapshot = await readStatusSnapshot(kv);
-  if (snapshot) return jsonResponse(snapshot);
+  let payload: PublicStatusSnapshot;
+  if (snapshot) {
+    payload = snapshot;
+  } else {
+    const config = await getStoredConfig(env);
+    payload = buildStatusSnapshot(config, statusesFromSnapshot(config, null), "startup", null, null);
+  }
 
-  const config = await getStoredConfig(env);
-  return jsonResponse(buildStatusSnapshot(config, statusesFromSnapshot(config, null), "startup", null, null));
+  return new Response(JSON.stringify(payload), {
+    headers: withCors({
+      "Content-Type": "application/json",
+      "Cache-Control": "public, max-age=60, s-maxage=60",
+    }),
+  });
 }
 
 async function writeTrustedStatusUpdate(
@@ -1408,63 +1418,70 @@ async function handleManualStatus(request: Request, env: Env) {
   return jsonResponse(result);
 }
 
+async function checkOneAccountForCron(
+  env: Env,
+  config: StoredConfig,
+  account: TikTokWatchAccount,
+  previousStatus: TikTokAccountStatus,
+  checkedAt: string,
+): Promise<TikTokAccountStatus> {
+  try {
+    const scrapedIsLive = await fetchTikTokLiveStatus(account.username, previousStatus.isLive);
+    const preserveTrustedLive = !scrapedIsLive && hasFreshTrustedLiveHold(previousStatus, checkedAt);
+    const isCurrentlyLive = preserveTrustedLive ? true : scrapedIsLive;
+    let nextStatus: TikTokAccountStatus = {
+      ...previousStatus,
+      ...account,
+      isLive: isCurrentlyLive,
+      lastChecked: checkedAt,
+      lastLiveChange: previousStatus.isLive !== isCurrentlyLive ? checkedAt : previousStatus.lastLiveChange,
+      lastError: preserveTrustedLive
+        ? `TikTok web check saw offline, but a trusted live update is active until ${previousStatus.trustedLiveUntil}.`
+        : null,
+      lastErrorAt: preserveTrustedLive ? checkedAt : null,
+      trustedLiveUntil: isCurrentlyLive ? previousStatus.trustedLiveUntil : null,
+      notificationError: isCurrentlyLive ? previousStatus.notificationError : null,
+      source: preserveTrustedLive ? previousStatus.source || "trusted_live_hold" : "cloudflare_cron",
+    };
+    const notification = await sendLiveNotificationIfNeeded(env, config, nextStatus, previousStatus.isLive);
+    return notification.status;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const errorSince = errorStartedAt(previousStatus, checkedAt);
+    const preserveLive =
+      hasFreshTrustedLiveHold(previousStatus, checkedAt) || shouldPreserveLiveAfterError(previousStatus, errorSince, checkedAt);
+    let nextStatus: TikTokAccountStatus = {
+      ...previousStatus,
+      ...account,
+      isLive: preserveLive,
+      lastChecked: checkedAt,
+      lastLiveChange: previousStatus.isLive !== preserveLive ? checkedAt : previousStatus.lastLiveChange,
+      lastError: message,
+      lastErrorAt: errorSince,
+      trustedLiveUntil: preserveLive ? previousStatus.trustedLiveUntil : null,
+      notificationError: preserveLive ? previousStatus.notificationError : null,
+      source: "cloudflare_cron",
+    };
+    const notification = await sendLiveNotificationIfNeeded(env, config, nextStatus, previousStatus.isLive);
+    console.error(`TikTok check failed for @${account.username}:`, message);
+    return notification.status;
+  }
+}
+
 async function runTikTokCheck(env: Env) {
   const config = await getStoredConfig(env);
   const kv = requireKv(env);
   const previousSnapshot = await readStatusSnapshot(kv);
   const previousStatuses = statusesFromSnapshot(config, previousSnapshot);
   const previousByUsername = new Map(previousStatuses.map((status) => [status.username.toLowerCase(), status] as const));
-  const statuses: TikTokAccountStatus[] = [];
   const checkedAt = new Date().toISOString();
 
-  for (const account of config.tiktokAccounts) {
-    const previousStatus = previousByUsername.get(account.username.toLowerCase()) || accountStatusFromRaw(account);
-
-    try {
-      const scrapedIsLive = await fetchTikTokLiveStatus(account.username, previousStatus.isLive);
-      const preserveTrustedLive = !scrapedIsLive && hasFreshTrustedLiveHold(previousStatus, checkedAt);
-      const isCurrentlyLive = preserveTrustedLive ? true : scrapedIsLive;
-      let nextStatus: TikTokAccountStatus = {
-        ...previousStatus,
-        ...account,
-        isLive: isCurrentlyLive,
-        lastChecked: checkedAt,
-        lastLiveChange: previousStatus.isLive !== isCurrentlyLive ? checkedAt : previousStatus.lastLiveChange,
-        lastError: preserveTrustedLive
-          ? `TikTok web check saw offline, but a trusted live update is active until ${previousStatus.trustedLiveUntil}.`
-          : null,
-        lastErrorAt: preserveTrustedLive ? checkedAt : null,
-        trustedLiveUntil: isCurrentlyLive ? previousStatus.trustedLiveUntil : null,
-        notificationError: isCurrentlyLive ? previousStatus.notificationError : null,
-        source: preserveTrustedLive ? previousStatus.source || "trusted_live_hold" : "cloudflare_cron",
-      };
-      const notification = await sendLiveNotificationIfNeeded(env, config, nextStatus, previousStatus.isLive);
-      nextStatus = notification.status;
-
-      statuses.push(nextStatus);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      const errorSince = errorStartedAt(previousStatus, checkedAt);
-      const preserveLive =
-        hasFreshTrustedLiveHold(previousStatus, checkedAt) || shouldPreserveLiveAfterError(previousStatus, errorSince, checkedAt);
-      let nextStatus: TikTokAccountStatus = {
-        ...previousStatus,
-        ...account,
-        isLive: preserveLive,
-        lastChecked: checkedAt,
-        lastLiveChange: previousStatus.isLive !== preserveLive ? checkedAt : previousStatus.lastLiveChange,
-        lastError: message,
-        lastErrorAt: errorSince,
-        trustedLiveUntil: preserveLive ? previousStatus.trustedLiveUntil : null,
-        notificationError: preserveLive ? previousStatus.notificationError : null,
-        source: "cloudflare_cron",
-      };
-      const notification = await sendLiveNotificationIfNeeded(env, config, nextStatus, previousStatus.isLive);
-      nextStatus = notification.status;
-      statuses.push(nextStatus);
-      console.error(`TikTok check failed for @${account.username}:`, message);
-    }
-  }
+  const statuses = await Promise.all(
+    config.tiktokAccounts.map((account) => {
+      const previousStatus = previousByUsername.get(account.username.toLowerCase()) || accountStatusFromRaw(account);
+      return checkOneAccountForCron(env, config, account, previousStatus, checkedAt);
+    }),
+  );
 
   await writeStatusSnapshot(kv, buildStatusSnapshot(config, statuses, "cloudflare_cron", previousSnapshot, checkedAt));
 }

@@ -330,7 +330,7 @@ function App() {
     };
 
     checkStatus();
-    const interval = window.setInterval(checkStatus, 60000);
+    const interval = window.setInterval(checkStatus, 5 * 60 * 1000);
     return () => window.clearInterval(interval);
   }, []);
 
