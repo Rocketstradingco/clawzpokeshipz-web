@@ -802,6 +802,27 @@ header {
   flex: 0 0 auto;
 }
 
+.failsafe-status {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 16px;
+  padding: 14px;
+  border: 1px solid #2b2b2b;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.failsafe-status span,
+.failsafe-status small {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
+.failsafe-status strong {
+  color: var(--poke-yellow);
+  font-size: 1.15rem;
+}
+
 .btn-icon.danger:hover {
   color: var(--accent-red);
   background: rgba(255, 0, 0, 0.08);

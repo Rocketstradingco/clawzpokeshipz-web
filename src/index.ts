@@ -56,6 +56,7 @@ type TikTokAccountStatus = TikTokWatchAccount & {
   lastLiveChange: string | null;
   lastError: string | null;
   lastErrorAt: string | null;
+  trustedLiveUntil: string | null;
   lastNotifiedAt: string | null;
   notificationError: string | null;
   source: string | null;
@@ -190,6 +191,7 @@ const MAX_TIKTOK_ACCOUNTS = 8;
 const TIKTOK_FETCH_TIMEOUT_MS = 9000;
 const TIKTOK_SCAN_LIMIT = 900_000;
 const LIVE_STATUS_PRESERVE_MS = 20 * 60 * 1000;
+const TRUSTED_LIVE_HOLD_MS = 6 * 60 * 60 * 1000;
 const TIKTOK_REQUEST_HEADERS = {
   "User-Agent":
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -752,6 +754,11 @@ function parseTimestamp(value: string | null) {
   return Number.isFinite(timestamp) ? timestamp : null;
 }
 
+function addMillisecondsIso(value: string, milliseconds: number) {
+  const timestamp = parseTimestamp(value) ?? Date.now();
+  return new Date(timestamp + milliseconds).toISOString();
+}
+
 function errorStartedAt(previousStatus: TikTokAccountStatus, checkedAt: string) {
   if (!previousStatus.lastError) return checkedAt;
   return previousStatus.lastErrorAt || previousStatus.lastChecked || checkedAt;
@@ -767,6 +774,16 @@ function shouldPreserveLiveAfterError(previousStatus: TikTokAccountStatus, error
   return checkedTimestamp - errorTimestamp < LIVE_STATUS_PRESERVE_MS;
 }
 
+function hasFreshTrustedLiveHold(status: TikTokAccountStatus, checkedAt: string) {
+  if (!status.isLive) return false;
+
+  const trustedUntil = parseTimestamp(status.trustedLiveUntil);
+  const checkedTimestamp = parseTimestamp(checkedAt);
+  if (trustedUntil === null || checkedTimestamp === null) return false;
+
+  return checkedTimestamp < trustedUntil;
+}
+
 function accountStatusFromRaw(account: TikTokWatchAccount, raw?: Partial<TikTokAccountStatus>): TikTokAccountStatus {
   return {
     ...account,
@@ -775,6 +792,7 @@ function accountStatusFromRaw(account: TikTokWatchAccount, raw?: Partial<TikTokA
     lastLiveChange: stringOrNull(raw?.lastLiveChange),
     lastError: stringOrNull(raw?.lastError),
     lastErrorAt: stringOrNull(raw?.lastErrorAt),
+    trustedLiveUntil: stringOrNull(raw?.trustedLiveUntil),
     lastNotifiedAt: stringOrNull(raw?.lastNotifiedAt),
     notificationError: stringOrNull(raw?.notificationError),
     source: stringOrNull(raw?.source),
@@ -861,6 +879,61 @@ function buildStatusSnapshot(
 
 async function writeStatusSnapshot(kv: StatusKv, snapshot: PublicStatusSnapshot) {
   await kv.put(STATUS_SNAPSHOT_KEY, JSON.stringify(snapshot));
+}
+
+async function sendLiveNotificationIfNeeded(
+  env: Env,
+  config: StoredConfig,
+  status: TikTokAccountStatus,
+  previousWasLive: boolean,
+  forceNotify = false,
+) {
+  let nextStatus = { ...status };
+  let notificationSent = false;
+  const shouldNotify = nextStatus.isLive && (forceNotify || !previousWasLive || Boolean(nextStatus.notificationError));
+
+  if (!shouldNotify) {
+    return { status: nextStatus, notificationSent };
+  }
+
+  if (!config.channelId) {
+    nextStatus = {
+      ...nextStatus,
+      notificationError: "No Discord notification channel is configured.",
+    };
+    return { status: nextStatus, notificationSent };
+  }
+
+  if (!env.DISCORD_TOKEN) {
+    nextStatus = {
+      ...nextStatus,
+      notificationError: "DISCORD_TOKEN is missing in Cloudflare secrets.",
+    };
+    return { status: nextStatus, notificationSent };
+  }
+
+  try {
+    await sendDiscordMessage(env, {
+      username: nextStatus.username,
+      channelId: config.channelId,
+      customMsg: nextStatus.customMessage,
+      mentionEveryone: config.mentionEveryone,
+    });
+    nextStatus = {
+      ...nextStatus,
+      lastNotifiedAt: nextStatus.lastChecked,
+      notificationError: null,
+    };
+    notificationSent = true;
+  } catch (error) {
+    nextStatus = {
+      ...nextStatus,
+      notificationError: error instanceof Error ? error.message : String(error),
+    };
+    console.error(`Discord notification failed for @${nextStatus.username}:`, nextStatus.notificationError);
+  }
+
+  return { status: nextStatus, notificationSent };
 }
 
 async function handleLogin(request: Request, env: Env) {
@@ -1212,18 +1285,17 @@ async function handleStatus(env: Env) {
   return jsonResponse(buildStatusSnapshot(config, statusesFromSnapshot(config, null), "startup", null, null));
 }
 
-async function handleExternalUpdate(request: Request, env: Env) {
-  const body = await readJsonBody<{ secret?: string; live?: boolean; username?: string }>(request);
-
-  if (!env.WORKER_UPDATE_SECRET || body.secret !== env.WORKER_UPDATE_SECRET) {
-    throw new HttpError("Invalid update secret.", 401, "UNAUTHORIZED");
-  }
-
-  if (typeof body.live !== "boolean") {
-    throw new HttpError("'live' must be a boolean.", 400, "BAD_REQUEST");
-  }
-
-  const username = normalizeTikTokUsername(body.username || env.TIKTOK_USERNAME || DEFAULT_TIKTOK_USERNAME);
+async function writeTrustedStatusUpdate(
+  env: Env,
+  options: {
+    live: boolean;
+    username?: unknown;
+    source: string;
+    notify: boolean;
+    forceNotify?: boolean;
+  },
+) {
+  const username = normalizeTikTokUsername(options.username || env.TIKTOK_USERNAME || DEFAULT_TIKTOK_USERNAME);
   const kv = requireKv(env);
   const config = await getStoredConfig(env);
   const configuredAccount = config.tiktokAccounts.find((item) => item.username.toLowerCase() === username.toLowerCase());
@@ -1242,23 +1314,98 @@ async function handleExternalUpdate(request: Request, env: Env) {
       };
   const previousSnapshot = await readStatusSnapshot(kv);
   const now = new Date().toISOString();
-  const statuses = statusesFromSnapshot(effectiveConfig, previousSnapshot).map((status) => {
-    if (status.username.toLowerCase() !== account.username.toLowerCase()) return status;
+  let notificationSent = false;
+  let notificationError: string | null = null;
+  const statuses: TikTokAccountStatus[] = [];
 
-    return {
+  for (const status of statusesFromSnapshot(effectiveConfig, previousSnapshot)) {
+    if (status.username.toLowerCase() !== account.username.toLowerCase()) {
+      statuses.push(status);
+      continue;
+    }
+
+    const previousWasLive = status.isLive;
+    let nextStatus: TikTokAccountStatus = {
       ...status,
       ...account,
-      isLive: body.live,
+      isLive: options.live,
       lastChecked: now,
-      lastLiveChange: status.isLive !== body.live ? now : status.lastLiveChange,
+      lastLiveChange: status.isLive !== options.live ? now : status.lastLiveChange,
       lastError: null,
-      notificationError: body.live ? status.notificationError : null,
-      source: "external_bot",
+      lastErrorAt: null,
+      trustedLiveUntil: options.live ? addMillisecondsIso(now, TRUSTED_LIVE_HOLD_MS) : null,
+      notificationError: options.live ? status.notificationError : null,
+      source: options.source,
     };
-  });
-  await writeStatusSnapshot(kv, buildStatusSnapshot(effectiveConfig, statuses, "external_bot", previousSnapshot, now));
 
-  return jsonResponse({ success: true, isLive: body.live, username });
+    if (options.live && options.notify) {
+      const notification = await sendLiveNotificationIfNeeded(
+        env,
+        effectiveConfig,
+        nextStatus,
+        previousWasLive,
+        Boolean(options.forceNotify),
+      );
+      nextStatus = notification.status;
+      notificationSent = notification.notificationSent;
+      notificationError = nextStatus.notificationError;
+    }
+
+    statuses.push(nextStatus);
+  }
+
+  const snapshot = buildStatusSnapshot(effectiveConfig, statuses, options.source, previousSnapshot, now);
+  await writeStatusSnapshot(kv, snapshot);
+
+  return {
+    success: true,
+    isLive: options.live,
+    username,
+    notificationSent,
+    notificationError,
+    snapshot,
+  };
+}
+
+async function handleExternalUpdate(request: Request, env: Env) {
+  const body = await readJsonBody<{ secret?: string; live?: boolean; username?: string; notify?: boolean; forceNotify?: boolean }>(request);
+
+  if (!env.WORKER_UPDATE_SECRET || body.secret !== env.WORKER_UPDATE_SECRET) {
+    throw new HttpError("Invalid update secret.", 401, "UNAUTHORIZED");
+  }
+
+  if (typeof body.live !== "boolean") {
+    throw new HttpError("'live' must be a boolean.", 400, "BAD_REQUEST");
+  }
+
+  const result = await writeTrustedStatusUpdate(env, {
+    live: body.live,
+    username: body.username,
+    source: "external_bot",
+    notify: body.notify !== false,
+    forceNotify: Boolean(body.forceNotify),
+  });
+
+  return jsonResponse(result);
+}
+
+async function handleManualStatus(request: Request, env: Env) {
+  await requireAdmin(request, env);
+  const body = await readJsonBody<{ live?: boolean; username?: string; notify?: boolean; forceNotify?: boolean }>(request);
+
+  if (typeof body.live !== "boolean") {
+    throw new HttpError("'live' must be a boolean.", 400, "BAD_REQUEST");
+  }
+
+  const result = await writeTrustedStatusUpdate(env, {
+    live: body.live,
+    username: body.username,
+    source: "admin_manual",
+    notify: body.live && body.notify !== false,
+    forceNotify: body.live && body.forceNotify !== false,
+  });
+
+  return jsonResponse(result);
 }
 
 async function runTikTokCheck(env: Env) {
@@ -1274,51 +1421,33 @@ async function runTikTokCheck(env: Env) {
     const previousStatus = previousByUsername.get(account.username.toLowerCase()) || accountStatusFromRaw(account);
 
     try {
-      const isCurrentlyLive = await fetchTikTokLiveStatus(account.username, previousStatus.isLive);
-      const nextStatus: TikTokAccountStatus = {
+      const scrapedIsLive = await fetchTikTokLiveStatus(account.username, previousStatus.isLive);
+      const preserveTrustedLive = !scrapedIsLive && hasFreshTrustedLiveHold(previousStatus, checkedAt);
+      const isCurrentlyLive = preserveTrustedLive ? true : scrapedIsLive;
+      let nextStatus: TikTokAccountStatus = {
         ...previousStatus,
         ...account,
         isLive: isCurrentlyLive,
         lastChecked: checkedAt,
         lastLiveChange: previousStatus.isLive !== isCurrentlyLive ? checkedAt : previousStatus.lastLiveChange,
-        lastError: null,
-        lastErrorAt: null,
+        lastError: preserveTrustedLive
+          ? `TikTok web check saw offline, but a trusted live update is active until ${previousStatus.trustedLiveUntil}.`
+          : null,
+        lastErrorAt: preserveTrustedLive ? checkedAt : null,
+        trustedLiveUntil: isCurrentlyLive ? previousStatus.trustedLiveUntil : null,
         notificationError: isCurrentlyLive ? previousStatus.notificationError : null,
-        source: "cloudflare_cron",
+        source: preserveTrustedLive ? previousStatus.source || "trusted_live_hold" : "cloudflare_cron",
       };
-      const shouldNotify =
-        isCurrentlyLive &&
-        (!previousStatus.isLive || Boolean(previousStatus.notificationError)) &&
-        (config.channelId || !previousStatus.isLive);
-
-      if (shouldNotify) {
-        if (!config.channelId) {
-          nextStatus.notificationError = "No Discord notification channel is configured.";
-        } else if (!env.DISCORD_TOKEN) {
-          nextStatus.notificationError = "DISCORD_TOKEN is missing in Cloudflare secrets.";
-        } else {
-          try {
-            await sendDiscordMessage(env, {
-              username: account.username,
-              channelId: config.channelId,
-              customMsg: account.customMessage,
-              mentionEveryone: config.mentionEveryone,
-            });
-            nextStatus.lastNotifiedAt = checkedAt;
-            nextStatus.notificationError = null;
-          } catch (error) {
-            nextStatus.notificationError = error instanceof Error ? error.message : String(error);
-            console.error(`Discord notification failed for @${account.username}:`, nextStatus.notificationError);
-          }
-        }
-      }
+      const notification = await sendLiveNotificationIfNeeded(env, config, nextStatus, previousStatus.isLive);
+      nextStatus = notification.status;
 
       statuses.push(nextStatus);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const errorSince = errorStartedAt(previousStatus, checkedAt);
-      const preserveLive = shouldPreserveLiveAfterError(previousStatus, errorSince, checkedAt);
-      statuses.push({
+      const preserveLive =
+        hasFreshTrustedLiveHold(previousStatus, checkedAt) || shouldPreserveLiveAfterError(previousStatus, errorSince, checkedAt);
+      let nextStatus: TikTokAccountStatus = {
         ...previousStatus,
         ...account,
         isLive: preserveLive,
@@ -1326,9 +1455,13 @@ async function runTikTokCheck(env: Env) {
         lastLiveChange: previousStatus.isLive !== preserveLive ? checkedAt : previousStatus.lastLiveChange,
         lastError: message,
         lastErrorAt: errorSince,
+        trustedLiveUntil: preserveLive ? previousStatus.trustedLiveUntil : null,
         notificationError: preserveLive ? previousStatus.notificationError : null,
         source: "cloudflare_cron",
-      });
+      };
+      const notification = await sendLiveNotificationIfNeeded(env, config, nextStatus, previousStatus.isLive);
+      nextStatus = notification.status;
+      statuses.push(nextStatus);
       console.error(`TikTok check failed for @${account.username}:`, message);
     }
   }
@@ -1419,6 +1552,10 @@ export default {
 
       if (url.pathname === "/admin/test-notify" && request.method === "POST") {
         return await handleTestNotify(request, env);
+      }
+
+      if (url.pathname === "/admin/status-override" && request.method === "POST") {
+        return await handleManualStatus(request, env);
       }
 
       if (env.ASSETS) {

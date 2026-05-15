@@ -257,6 +257,7 @@ function App() {
   const [newTikTokUsername, setNewTikTokUsername] = useState('');
   const [newTikTokMessage, setNewTikTokMessage] = useState(DEFAULT_CUSTOM_MESSAGE);
   const [tiktokVerifyMessage, setTikTokVerifyMessage] = useState('');
+  const [manualStatusMessage, setManualStatusMessage] = useState('');
   const [mentionEveryone, setMentionEveryone] = useState(false);
   const [homepageContent, setHomepageContent] = useState<HomepageContent>(DEFAULT_HOMEPAGE_CONTENT);
   const [isBusy, setIsBusy] = useState(false);
@@ -484,6 +485,52 @@ function App() {
       alert('Test notification sent to Discord.');
     } catch (err) {
       alert(`Failed to send test notification: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const setManualLiveStatus = async (live: boolean) => {
+    setIsBusy(true);
+    setManualStatusMessage('');
+    try {
+      const saved = await saveConfig({ showAlert: false, manageBusy: false });
+      if (!saved) return;
+
+      const data = (await apiRequest('/admin/status-override', {
+        method: 'POST',
+        body: JSON.stringify({
+          live,
+          username: tiktokAccounts[0]?.username || tiktokUsername,
+          notify: live,
+          forceNotify: live,
+        }),
+      })) as {
+        isLive: boolean;
+        username: string;
+        notificationSent?: boolean;
+        notificationError?: string | null;
+        snapshot?: StatusPayload;
+      };
+
+      setIsLive(Boolean(data.isLive));
+      setLastChecked(data.snapshot?.lastChecked || new Date().toISOString());
+      setStatusSource(data.snapshot?.source || 'admin_manual');
+      if (data.snapshot?.liveUrl) setTiktokLink(data.snapshot.liveUrl);
+
+      const message = live
+        ? data.notificationError
+          ? `Marked @${data.username} live. Discord notification failed: ${data.notificationError}`
+          : data.notificationSent
+            ? `Marked @${data.username} live and sent Discord notification.`
+            : `Marked @${data.username} live.`
+        : `Marked @${data.username} offline.`;
+      setManualStatusMessage(message);
+      alert(message);
+    } catch (err) {
+      const message = `Failed to update live status: ${err instanceof Error ? err.message : String(err)}`;
+      setManualStatusMessage(message);
+      alert(message);
     } finally {
       setIsBusy(false);
     }
@@ -888,6 +935,26 @@ function App() {
                           </div>
                         ))}
                       </div>
+                    </div>
+
+                    <div className="admin-subsection live-failsafe">
+                      <h3>
+                        <Bell size={18} /> LIVE FAILSAFE
+                      </h3>
+                      <div className="failsafe-status">
+                        <span>Site Status</span>
+                        <strong>{isLive ? 'LIVE' : 'OFFLINE'}</strong>
+                        <small>{formatCheckedAt(lastChecked)}{statusSource ? ` via ${statusSource.replace('_', ' ')}` : ''}</small>
+                      </div>
+                      <div className="dashboard-actions">
+                        <button className="btn btn-primary" onClick={() => setManualLiveStatus(true)} disabled={isBusy} type="button">
+                          <Radio size={18} /> MARK LIVE & SEND NOTIFY
+                        </button>
+                        <button className="btn btn-secondary" onClick={() => setManualLiveStatus(false)} disabled={isBusy} type="button">
+                          <RefreshCw size={18} /> MARK OFFLINE
+                        </button>
+                      </div>
+                      {manualStatusMessage && <p className={manualStatusMessage.includes('failed') ? 'admin-alert' : 'field-note'}>{manualStatusMessage}</p>}
                     </div>
 
                     <div className="field checkbox-field">

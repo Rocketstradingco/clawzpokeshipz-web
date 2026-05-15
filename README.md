@@ -30,6 +30,7 @@ This project is tuned to stay inside Cloudflare's free limits for a small live-s
 - `/status` reads that same snapshot key when available, keeping public polling cheap
 - the TikTok watch list is capped at 8 accounts to keep each cron invocation well below the Workers Free subrequest limit
 - if TikTok returns a block, challenge, timeout, or ambiguous page while the account was previously live, the Worker preserves the previous status only briefly so a stale live badge cannot stay on forever
+- trusted `/update` calls and admin live overrides send the Discord live notification and hold the live badge for a bounded window so fragile TikTok web checks cannot immediately overwrite a known live stream
 - Discord notification failures are saved in the snapshot and retried while the account remains live
 
 Cloudflare's free KV write limit is the practical constraint for this watcher. At the current 5-minute interval, the scheduled monitor should use about 288 status writes per day before occasional admin/session/config writes.
@@ -81,8 +82,9 @@ Content-Type: application/json
 {
   "secret": "same value as WORKER_UPDATE_SECRET",
   "live": true,
-  "username": "clawzpokeshipz"
+  "username": "clawllstarzpokeshipz",
+  "notify": true
 }
 ```
 
-The external bot sends its own Discord webhook notification. The Cloudflare Cron watcher also sends a Discord message when it detects a transition from offline to live and a channel is configured.
+The Worker sends the configured Discord notification when a trusted update or the Cloudflare Cron watcher detects a transition from offline to live. The admin dashboard also has a live failsafe control for manually marking the stream live and sending the notification when TikTok's web status is wrong.
